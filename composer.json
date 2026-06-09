@@ -1,0 +1,45 @@
+{
+    "name": "1d98/framework",
+    "description": "Universal zero-dependency PHP 8.5 framework skeleton",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["framework", "php8.5", "skeleton", "zero-dependency", "immutable"],
+    "homepage": "https://github.com/1d98/framework",
+    "support": {
+        "issues": "https://github.com/1d98/framework/issues",
+        "source": "https://github.com/1d98/framework"
+    },
+    "require": {
+        "php": "^8.5"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.5",
+        "phpstan/phpstan": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Framework\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Framework\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "stan": "phpstan analyse --memory-limit=512M",
+        "check": [
+            "@test",
+            "@stan"
+        ]
+    },
+    "config": {
+        "sort-packages": true,
+        "preferred-install": "dist",
+        "allow-plugins": {
+            "php-http/discovery": false
+        }
+    },
+    "minimum-stability": "stable"
+}

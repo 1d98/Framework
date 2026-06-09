@@ -1,0 +1,7 @@
+{
+    "testWithHeaderChainCompletesInReasonableTime": 0.390,
+    "testWithCookieChainCompletesInReasonableTime": 0.198,
+    "phpstan": {
+        "wall_seconds": 25
+    }
+}

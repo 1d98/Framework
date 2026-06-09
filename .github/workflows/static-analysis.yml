@@ -1,0 +1,96 @@
+name: Static Analysis
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  phpstan-perf:
+    name: PHPStan perf (PHP 8.5)
+    # Perf tracking is PR-only by design: it diffs against the committed
+    # baseline and posts a sticky comment. On push to main there is no PR
+    # context to comment on, and `ci.yml` already covers main-branch
+    # correctness, so the job is a no-op there. The `push` trigger is still
+    # declared so the file matches the contract; only PR runs go through
+    # the steps below.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+          tools: composer
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        shell: bash
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: php-8.5-${{ runner.os }}-composer-${{ hashFiles('**/composer.json') }}
+          restore-keys: php-8.5-${{ runner.os }}-composer-
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run PHPStan (timed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p var/tmp
+          # Capture the `time` output (stderr) without polluting the phpstan
+          # status line — we only need the `real` row for the diff.
+          { time vendor/bin/phpstan analyse --no-progress --memory-limit=512M; } \
+            >var/tmp/phpstan-stdout.txt 2>var/tmp/phpstan-time.log
+          cat var/tmp/phpstan-stdout.txt
+          echo "---"
+          cat var/tmp/phpstan-time.log
+
+      - name: Parse & compare against baseline
+        id: compare
+        shell: bash
+        env:
+          STAN_WARN_SECONDS: '30'
+          STAN_FAIL_SECONDS: '60'
+        run: |
+          set -euo pipefail
+          ./static-analysis-pr-comment.sh \
+            .github/baselines.json \
+            var/tmp/phpstan-time.log \
+            var/tmp/phpstan-comment.md \
+            "$STAN_WARN_SECONDS" \
+            "$STAN_FAIL_SECONDS"
+          echo "comment_bytes=$(wc -c < var/tmp/phpstan-comment.md | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Upload PHPStan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phpstan-perf-${{ runner.os }}-php8.5
+          path: |
+            var/tmp/phpstan-stdout.txt
+            var/tmp/phpstan-time.log
+            var/tmp/phpstan-comment.md
+          if-no-files-found: ignore
+
+      - name: Post PR comment
+        if: always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: phpstan-perf
+          path: var/tmp/phpstan-comment.md

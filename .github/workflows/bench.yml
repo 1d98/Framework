@@ -1,0 +1,93 @@
+name: Bench
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  bench:
+    name: Bench (PHP 8.5)
+    # Bench is PR-only by design: it diffs against the committed baseline and
+    # posts a sticky comment. On push to main there is no PR context to
+    # comment on, and `ci.yml` already covers main-branch correctness, so the
+    # job is a no-op there. The `push` trigger is still declared so the file
+    # matches the contract; only PR runs go through the steps below.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+          tools: composer
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        shell: bash
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: php-8.5-${{ runner.os }}-composer-${{ hashFiles('**/composer.json') }}
+          restore-keys: php-8.5-${{ runner.os }}-composer-
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run bench suite (JUnit)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p var/tmp
+          vendor/bin/phpunit \
+            --group bench \
+            --testdox \
+            --log-junit var/tmp/bench-junit.xml \
+            2>&1 | tee var/tmp/bench-stdout.txt
+
+      - name: Parse & compare against baseline
+        id: compare
+        shell: bash
+        env:
+          REGRESS_WARN_PCT: '5'
+          REGRESS_FAIL_PCT: '20'
+        run: |
+          set -euo pipefail
+          ./bench-pr-comment.sh \
+            .github/baselines.json \
+            var/tmp/bench-junit.xml \
+            var/tmp/bench-comment.md \
+            "$REGRESS_WARN_PCT" \
+            "$REGRESS_FAIL_PCT"
+          echo "comment_bytes=$(wc -c < var/tmp/bench-comment.md | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Upload bench artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ runner.os }}-php8.5
+          path: |
+            var/tmp/bench-junit.xml
+            var/tmp/bench-stdout.txt
+            var/tmp/bench-comment.md
+          if-no-files-found: ignore
+
+      - name: Post PR comment
+        if: always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: bench
+          path: var/tmp/bench-comment.md

@@ -1,0 +1,47 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Framework\Config\Config;
+use Framework\Config\ConfigInterface;
+use Framework\Console\Application;
+use Framework\Console\Command\AppSecretCommand;
+use Framework\Console\Command\ConfigShowCommand;
+use Framework\Console\Command\ListCommand;
+use Framework\Console\Command\Make\MakeCommandCommand;
+use Framework\Console\Command\Make\MakeControllerCommand;
+use Framework\Console\Command\Make\MakeDtoCommand;
+use Framework\Console\Command\Make\MakeExceptionCommand;
+use Framework\Console\Command\Make\MakeMiddlewareCommand;
+use Framework\Console\Command\Make\MakeRuleCommand;
+use Framework\Console\Command\RoutesListCommand;
+use Framework\Container\Container;
+use Framework\Http\Router\Router;
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+$container = new Container();
+$container->set(ConfigInterface::class, static fn(): ConfigInterface
+    => Config::fromArray([
+        'app' => [
+            'env' => getenv('APP_ENV') ?: 'dev',
+            'version' => \Framework\Framework::VERSION,
+        ],
+    ]));
+$container->set(Router::class, static fn(): Router => new Router());
+
+$app = new Application($container, 'Framework Console', \Framework\Framework::VERSION);
+$app
+    ->add(new ListCommand($container, $app))
+    ->add(new ConfigShowCommand($container, $container->get(ConfigInterface::class)))
+    ->add(new RoutesListCommand($container, $container->get(Router::class)))
+    ->add(new AppSecretCommand($container))
+    ->add(new MakeCommandCommand($container, __DIR__ . '/../src/Console/Command'))
+    ->add(new MakeControllerCommand($container, __DIR__ . '/../src/Http/Controller'))
+    ->add(new MakeExceptionCommand($container, __DIR__ . '/../src/Http/Exception'))
+    ->add(new MakeMiddlewareCommand($container, __DIR__ . '/../src/Http/Middleware'))
+    ->add(new MakeRuleCommand($container, __DIR__ . '/../src/Validation/Rule'))
+    ->add(new MakeDtoCommand($container, __DIR__ . '/../src/Validation/Dto'));
+
+exit($app->run($argv));

@@ -21,6 +21,26 @@ use Framework\Http\Router\Router;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
+/**
+ * Resolve the target directory for a make:* command.
+ *
+ * When run from the framework's own repo (development), use the repo's
+ * `src/...` tree. When installed via Composer, the consumer's project
+ * root is the CWD — write there under conventional paths.
+ *
+ * @param string $frameworkSubPath e.g. 'src/Http/Controller'
+ */
+function makeTargetDir(string $frameworkSubPath): string
+{
+    $frameworkRoot = \dirname(__DIR__);
+    $isFrameworkRepo = is_file($frameworkRoot . '/composer.json')
+        && is_dir($frameworkRoot . '/.git');
+    if ($isFrameworkRepo) {
+        return $frameworkRoot . '/' . $frameworkSubPath;
+    }
+    return getcwd() . '/' . $frameworkSubPath;
+}
+
 $container = new Container();
 $container->set(ConfigInterface::class, static fn(): ConfigInterface
     => Config::fromArray([
@@ -37,11 +57,11 @@ $app
     ->add(new ConfigShowCommand($container, $container->get(ConfigInterface::class)))
     ->add(new RoutesListCommand($container, $container->get(Router::class)))
     ->add(new AppSecretCommand($container))
-    ->add(new MakeCommandCommand($container, __DIR__ . '/../src/Console/Command'))
-    ->add(new MakeControllerCommand($container, __DIR__ . '/../src/Http/Controller'))
-    ->add(new MakeExceptionCommand($container, __DIR__ . '/../src/Http/Exception'))
-    ->add(new MakeMiddlewareCommand($container, __DIR__ . '/../src/Http/Middleware'))
-    ->add(new MakeRuleCommand($container, __DIR__ . '/../src/Validation/Rule'))
-    ->add(new MakeDtoCommand($container, __DIR__ . '/../src/Validation/Dto'));
+    ->add(new MakeCommandCommand($container, makeTargetDir('src/Console/Command')))
+    ->add(new MakeControllerCommand($container, makeTargetDir('src/Http/Controller')))
+    ->add(new MakeExceptionCommand($container, makeTargetDir('src/Http/Exception')))
+    ->add(new MakeMiddlewareCommand($container, makeTargetDir('src/Http/Middleware')))
+    ->add(new MakeRuleCommand($container, makeTargetDir('src/Validation/Rule')))
+    ->add(new MakeDtoCommand($container, makeTargetDir('src/Validation/Dto')));
 
 exit($app->run($argv));

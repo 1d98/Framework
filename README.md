@@ -14,7 +14,12 @@ Most PHP frameworks drag in a hundred transitive dependencies and lock you into 
 - **DI Container** with autowiring via reflection.
 - **HTTP stack** with a tiny router, middleware pipeline, RFC 7807 errors, and exception-aware kernel.
 - **Production-safe by default** — generic exception messages are hidden, opt in to debug mode to expose them.
-- Test count is tracked by CI — see [the CI workflow](https://github.com/1d98/framework/actions/workflows/ci.yml) for the current number.
+Test count is tracked by CI.
+
+[![CI](https://github.com/1d98/framework/actions/workflows/ci.yml/badge.svg)](https://github.com/1d98/framework/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/1d98/framework?include_prereleases&label=release)](https://github.com/1d98/framework/releases)
+
+See [the CI workflow](https://github.com/1d98/framework/actions/workflows/ci.yml) for the current number.
 
 ## Requirements
 

@@ -26,10 +26,16 @@ final class MultipartBodyParserCleanupTest extends TestCase
 
     protected function tearDown(): void
     {
-        if (is_dir($this->tmpDir)) {
-            foreach (glob($this->tmpDir . '/upl_*') ?: [] as $file) {
+        if (!is_dir($this->tmpDir)) {
+            return;
+        }
+        foreach (glob($this->tmpDir . '/upl_*') ?: [] as $file) {
+            if (is_file($file)) {
                 @unlink($file);
             }
+        }
+        $entries = @scandir($this->tmpDir) ?: [];
+        if (count($entries) <= 2) {
             @rmdir($this->tmpDir);
         }
     }
@@ -58,17 +64,15 @@ final class MultipartBodyParserCleanupTest extends TestCase
 
         $middleware = new MultipartBodyParser($this->tmpDir, maxBodyBytes: 250);
 
-        $before = $this->countUploadFiles();
-
         try {
             $middleware->process($request, static fn(Request $r): Response => Response::json([]));
             self::fail('Expected PayloadTooLargeHttpException');
         } catch (PayloadTooLargeHttpException) {
-            $after = $this->countUploadFiles();
+            $leaks = glob($this->tmpDir . '/upl_*') ?: [];
             self::assertSame(
-                $before,
-                $after,
-                "Temp files leaked on cap-exceeded failure (before={$before}, after={$after})",
+                [],
+                $leaks,
+                'No temp files should remain after cap-exceeded failure: ' . implode(', ', $leaks),
             );
         }
     }
@@ -94,17 +98,15 @@ final class MultipartBodyParserCleanupTest extends TestCase
 
         $middleware = new MultipartBodyParser($this->tmpDir);
 
-        $before = $this->countUploadFiles();
-
         try {
             $middleware->process($request, static fn(Request $r): Response => Response::json([]));
             self::fail('Expected BadRequestHttpException');
         } catch (BadRequestHttpException) {
-            $after = $this->countUploadFiles();
+            $leaks = glob($this->tmpDir . '/upl_*') ?: [];
             self::assertSame(
-                $before,
-                $after,
-                "Temp files leaked on malformed-multipart failure (before={$before}, after={$after})",
+                [],
+                $leaks,
+                'No temp files should remain after malformed-multipart failure: ' . implode(', ', $leaks),
             );
         }
     }
@@ -129,7 +131,6 @@ final class MultipartBodyParserCleanupTest extends TestCase
         );
 
         $middleware = new MultipartBodyParser($this->tmpDir);
-        $before = $this->countUploadFiles();
 
         $collectedPaths = [];
         $middleware->process($request, static function (Request $r) use (&$collectedPaths): Response {
@@ -146,11 +147,6 @@ final class MultipartBodyParserCleanupTest extends TestCase
         foreach ($collectedPaths as $path) {
             self::assertFileExists($path, "Successful parse must preserve temp file: {$path}");
         }
-        self::assertGreaterThan(
-            $before,
-            $this->countUploadFiles(),
-            'Successful parse must leave the user\'s temp files in place',
-        );
 
         foreach ($collectedPaths as $path) {
             @unlink($path);
@@ -189,11 +185,5 @@ final class MultipartBodyParserCleanupTest extends TestCase
                 'No temp files should remain after cap-exceeded failure: ' . implode(', ', $leaks),
             );
         }
-    }
-
-    private function countUploadFiles(): int
-    {
-        $files = glob($this->tmpDir . '/upl_*') ?: [];
-        return count(array_filter($files, 'is_file'));
     }
 }

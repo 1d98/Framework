@@ -19,6 +19,13 @@ abstract class LiveHttpTestCase extends TestCase
     /** @var resource|null */
     private $serverProcess = null;
 
+    /**
+     * stdout / stderr pipes of the spawned server.
+     *
+     * @var array<int, resource>|null
+     */
+    private ?array $serverPipes = null;
+
     protected function appEnv(): string
     {
         return 'dev';
@@ -48,13 +55,13 @@ abstract class LiveHttpTestCase extends TestCase
 
         $logDir = dirname($this->logFile);
         if (!is_dir($logDir)) {
-            mkdir($logDir, 0777, true);
+            @mkdir($logDir, 0777, true);
         }
 
         $descriptors = [
             0 => ['pipe', 'r'],
-            1 => ['file', $this->logFile, 'w'],
-            2 => ['file', $this->logFile, 'a'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
         ];
 
         $cmd = sprintf(
@@ -77,6 +84,9 @@ abstract class LiveHttpTestCase extends TestCase
             self::fail('Failed to start PHP built-in server (proc_open returned non-resource)');
         }
         $this->serverProcess = $process;
+        $this->serverPipes = $pipes;
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
 
         for ($i = 0; $i < 30; $i++) {
             $ch = curl_init($this->baseUrl . '/');
@@ -97,16 +107,27 @@ abstract class LiveHttpTestCase extends TestCase
 
     protected function tearDown(): void
     {
+        if ($this->serverPipes !== null) {
+            foreach ([1, 2] as $idx) {
+                if (isset($this->serverPipes[$idx]) && is_resource($this->serverPipes[$idx])) {
+                    @fclose($this->serverPipes[$idx]);
+                }
+            }
+            $this->serverPipes = null;
+        }
+
         if (is_resource($this->serverProcess)) {
             $status = proc_get_status($this->serverProcess);
             if ($status['running']) {
-                proc_terminate($this->serverProcess, SIGTERM);
+                $signal = defined('SIGTERM') ? SIGTERM : 15;
+                proc_terminate($this->serverProcess, $signal);
                 usleep(1_000_000);
             }
             proc_close($this->serverProcess);
             $this->serverProcess = null;
         }
-        if (getenv('KEEP_TEST_LOG') !== '1' && file_exists($this->logFile)) {
+
+        if (getenv('KEEP_TEST_LOG') !== '1' && is_file($this->logFile)) {
             @unlink($this->logFile);
         }
     }

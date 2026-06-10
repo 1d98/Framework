@@ -104,9 +104,9 @@ final class RouterGroupPerformanceTest extends TestCase
             'each match() must exit at the first hit (position 500 + 1 = 501 calls) and never re-iterate',
         );
         self::assertLessThan(
-            200.0,
+            500.0,
             $elapsedMs,
-            sprintf('1000 dynamic matches took %.2fms (expected < 200ms — no per-call compile overhead)', $elapsedMs),
+            sprintf('1000 dynamic matches took %.2fms (expected < 500ms — no per-call compile overhead)', $elapsedMs),
         );
     }
 

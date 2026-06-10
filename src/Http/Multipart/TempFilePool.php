@@ -63,6 +63,10 @@ final class TempFilePool
      * Unlink every tracked path. Used by the middleware's catch
      * block to make a half-parsed request disappear cleanly.
      *
+     * Only files are removed — the parent directory is owned by
+     * the caller, never by the pool. A buggy caller must not be
+     * able to nuke a system tmp dir via this method.
+     *
      * @param list<string> $extra Paths written outside the pool
      *                            (e.g. when {@see write()} returned
      *                            an error and the pool didn't track
@@ -72,21 +76,11 @@ final class TempFilePool
      */
     public function release(array $extra = []): void
     {
-        $parent = null;
         foreach ([...$this->paths, ...$extra] as $path) {
             if ($path === '') {
                 continue;
             }
-            if ($parent === null) {
-                $parent = dirname($path);
-            }
             @unlink($path);
-        }
-        if ($parent !== null && is_dir($parent)) {
-            $remaining = @scandir($parent);
-            if (is_array($remaining) && count($remaining) <= 2) {
-                @rmdir($parent);
-            }
         }
     }
 

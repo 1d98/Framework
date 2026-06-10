@@ -26,6 +26,26 @@
             "Framework\\Tests\\": "tests/"
         }
     },
+    "bin": ["bin/framework"],
+    "archive": {
+        "exclude": [
+            ".github",
+            "docs",
+            "examples",
+            "tests",
+            "var/tmp/.gitignore",
+            "var/tmp/**/.gitignore",
+            ".gitattributes",
+            ".gitignore",
+            "composer.lock",
+            "phpstan.neon",
+            "phpunit.xml",
+            "opencode.json",
+            ".phpunit.cache",
+            ".phpunit.result.cache",
+            ".phpstan"
+        ]
+    },
     "scripts": {
         "test": "phpunit",
         "stan": "phpstan analyse --memory-limit=512M",

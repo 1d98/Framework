@@ -417,7 +417,7 @@ final class MultipartBodyParserTest extends TestCase
             $files = $r->files();
             self::assertIsArray($files);
             self::assertInstanceOf(UploadedFile::class, $files['file'] ?? null);
-            self::assertStringStartsWith($defaultDir . '/', $files['file']->tmpPath);
+            self::assertSame($defaultDir, dirname($files['file']->tmpPath));
             self::assertFileExists($files['file']->tmpPath);
             self::assertSame('hello default', file_get_contents($files['file']->tmpPath));
             @unlink($files['file']->tmpPath);
@@ -439,7 +439,7 @@ final class MultipartBodyParserTest extends TestCase
                 $files = $r->files();
                 self::assertIsArray($files);
                 self::assertInstanceOf(UploadedFile::class, $files['file'] ?? null);
-                self::assertStringStartsWith($resolvedDir . '/', $files['file']->tmpPath);
+                self::assertSame($resolvedDir, dirname($files['file']->tmpPath));
                 self::assertFileExists($files['file']->tmpPath);
                 self::assertSame('hello custom', file_get_contents($files['file']->tmpPath));
                 @unlink($files['file']->tmpPath);
@@ -458,13 +458,13 @@ final class MultipartBodyParserTest extends TestCase
         $middleware = new MultipartBodyParser($nestedDir);
         $request = $this->multipartRequestWithFile('hello nested');
 
-        $middleware->process($request, static function (Request $r): Response {
+        $middleware->process($request, static function (Request $r) use ($nestedDir): Response {
             $files = $r->files();
             self::assertIsArray($files);
             self::assertInstanceOf(UploadedFile::class, $files['file'] ?? null);
             self::assertFileExists($files['file']->tmpPath);
             self::assertSame('hello nested', file_get_contents($files['file']->tmpPath));
-            self::assertStringContainsString('/mwb_nested_', $files['file']->tmpPath);
+            self::assertSame(realpath($nestedDir), realpath(dirname($files['file']->tmpPath)));
             @unlink($files['file']->tmpPath);
             return Response::json([]);
         });

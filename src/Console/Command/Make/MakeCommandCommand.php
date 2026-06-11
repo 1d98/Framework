@@ -95,6 +95,7 @@ PHP;
         }
 
         $output->success("Created {$path}");
+        $output->info("Class: {$class}");
         $output->info('Next: register the command in bin/framework and regenerate the autoloader.');
         return 0;
     }

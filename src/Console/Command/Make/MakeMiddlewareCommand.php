@@ -79,6 +79,7 @@ PHP;
         }
 
         $output->success("Created {$path}");
+        $output->info("Class: {$class}");
         $output->info('Next: register the middleware in your HTTP pipeline (e.g. public/index.php).');
         return 0;
     }

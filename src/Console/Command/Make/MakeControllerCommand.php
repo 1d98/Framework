@@ -89,6 +89,7 @@ PHP;
         }
 
         $output->success("Created {$path}");
+        $output->info("Class: {$class}");
         $output->info("Controller route slug: {$name}");
         $output->info("Description: {$description}");
         $output->info('Next: register the controller in your router (e.g. public/index.php).');

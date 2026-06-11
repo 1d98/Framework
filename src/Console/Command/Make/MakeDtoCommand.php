@@ -93,6 +93,7 @@ PHP;
         }
 
         $output->success("Created {$path}");
+        $output->info("Class: {$class}");
         $output->info('Next: add #[Validate(...)] attributes to your properties and bind with $request->bind(' . $class . '::class).');
         return 0;
     }

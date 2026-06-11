@@ -96,6 +96,11 @@ final readonly class Response
         return $this->withHeader('X-Request-Id', $id);
     }
 
+    /**
+     * @deprecated since 0.5.x — use {@see self::withStatus()} instead.
+     *     The method is kept for backward compatibility; new code should
+     *     use the immutable builder.
+     */
     public function setStatus(int $code, ?string $reason = null): self
     {
         if ($reason !== null) {
@@ -160,10 +165,7 @@ final readonly class Response
 
     private function buildStatusLine(): string
     {
-        $reason = $this->reasonPhrase ?? StatusText::for($this->status);
-        if ($reason === 'Unknown') {
-            $reason = '';
-        }
+        $reason = $this->reasonPhrase ?? StatusText::for($this->status) ?? '';
 
         return 'HTTP/1.1 ' . $this->status . ($reason !== '' ? ' ' . $reason : '');
     }

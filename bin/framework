@@ -41,6 +41,20 @@ function makeTargetDir(string $frameworkSubPath): string
     return getcwd() . '/' . $frameworkSubPath;
 }
 
+/**
+ * Resolve the initial debug flag from the `APP_DEBUG` env var.
+ * `Application::isDebug()` may still be overridden at runtime by
+ * `--debug` / `--no-debug` flags.
+ */
+function envDebug(): bool
+{
+    $value = getenv('APP_DEBUG');
+    if ($value === false || $value === '') {
+        return false;
+    }
+    return in_array(strtolower($value), ['1', 'true', 'yes', 'on'], true);
+}
+
 $container = new Container();
 $container->set(ConfigInterface::class, static fn(): ConfigInterface
     => Config::fromArray([
@@ -51,7 +65,7 @@ $container->set(ConfigInterface::class, static fn(): ConfigInterface
     ]));
 $container->set(Router::class, static fn(): Router => new Router());
 
-$app = new Application($container, 'Framework Console', \Framework\Framework::VERSION);
+$app = new Application($container, 'Framework Console', \Framework\Framework::VERSION, debug: envDebug());
 $app
     ->add(new ListCommand($container, $app))
     ->add(new ConfigShowCommand($container, $container->get(ConfigInterface::class)))

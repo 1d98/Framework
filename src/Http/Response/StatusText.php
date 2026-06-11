@@ -49,8 +49,15 @@ final readonly class StatusText
         505 => 'HTTP Version Not Supported',
     ];
 
-    public static function for(int $code): string
+    /**
+     * Return the canonical HTTP reason phrase for a status code, or
+     * `null` if the code is not in the IANA registry maintained here.
+     * Callers must handle `null` explicitly — typically by substituting
+     * an empty reason phrase in a status line, or by rendering the
+     * code in a problem-details body.
+     */
+    public static function for(int $code): ?string
     {
-        return self::REASONS[$code] ?? 'Unknown';
+        return self::REASONS[$code] ?? null;
     }
 }

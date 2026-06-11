@@ -114,6 +114,7 @@ PHP;
         }
 
         $output->success("Created {$path}");
+        $output->info("Class: {$class}");
         $output->info("Status: {$status}");
         $output->info('Next: throw this exception from a controller — HttpKernel renders it as application/problem+json.');
         return 0;

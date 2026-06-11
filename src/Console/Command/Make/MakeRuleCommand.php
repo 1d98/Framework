@@ -95,6 +95,7 @@ PHP;
         }
 
         $output->success("Created {$path}");
+        $output->info("Class: {$class}");
         $output->info('Next: register the rule in your RuleRegistry (or use a #[Validate] shorthand).');
         return 0;
     }

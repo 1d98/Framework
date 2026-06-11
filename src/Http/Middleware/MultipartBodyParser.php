@@ -50,10 +50,28 @@ final class MultipartBodyParser implements MiddlewareInterface
 
     private readonly int $maxBodyBytes;
 
-    public function __construct(?string $tmpDir = null, int $maxBodyBytes = 0)
-    {
+    private readonly int $maxPartBytes;
+
+    /**
+     * @param int $maxBodyBytes Cumulative body cap in bytes. Defaults to
+     *     {@see Request::MAX_BODY_BYTES}. The cap is enforced upstream
+     *     by {@see \Framework\Http\Request\RequestFactory::readBodyCapped()},
+     *     so by the time this middleware runs the body is always
+     *     within it. Pass a smaller value to add defense-in-depth at
+     *     the middleware layer.
+     * @param int $maxPartBytes Per-part cap in bytes. Defaults to
+     *     {@see \Framework\Http\Multipart\MultipartParser::MAX_PART_BYTES}.
+     *     Tighten this for endpoints that accept many small uploads
+     *     to bound worst-case memory per part.
+     */
+    public function __construct(
+        ?string $tmpDir = null,
+        int $maxBodyBytes = 0,
+        int $maxPartBytes = 0,
+    ) {
         $this->tmpDir = $tmpDir ?? __DIR__ . '/../../../var/tmp/';
         $this->maxBodyBytes = $maxBodyBytes > 0 ? $maxBodyBytes : Request::MAX_BODY_BYTES;
+        $this->maxPartBytes = $maxPartBytes > 0 ? $maxPartBytes : MultipartParser::MAX_PART_BYTES;
     }
 
     public function process(Request $request, callable $next): Response
@@ -93,7 +111,12 @@ final class MultipartBodyParser implements MiddlewareInterface
             return $next($request->withForm([])->withFiles([]));
         }
 
-        $parsed = (new MultipartParser($request->body, $boundary, $this->maxBodyBytes))->parse();
+        $parsed = (new MultipartParser(
+            $request->body,
+            $boundary,
+            $this->maxBodyBytes,
+            $this->maxPartBytes,
+        ))->parse();
         $pool = new TempFilePool($this->tmpDir);
 
         try {

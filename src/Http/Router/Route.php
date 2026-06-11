@@ -276,15 +276,19 @@ final class Route
     }
 
     /**
-     * Return a new route with `$prefix` prepended to its path. The path-
-     * dependent memo fields (`compiledPattern`, `staticCache`,
-     * `specificityCache`) and the method-dependent `normalizedMethod`
-     * are reset on the clone — `staticCache` and `specificityCache`
-     * are passed as explicit `null` so the invalidation is visible at
-     * the call site rather than relying on `RouteMemo`'s default
-     * arguments. The new pattern is compiled immediately so the first
-     * `match()` on the clone is O(1); the registration order is
-     * preserved through the prefix change.
+     * Return a new route with `$prefix` prepended to its path. The
+     * original instance is not mutated; all path-dependent memo
+     * fields (`compiledPattern`, `staticCache`, `specificityCache`)
+     * and the method-dependent `normalizedMethod` are reset on the
+     * clone — `staticCache` and `specificityCache` are passed as
+     * explicit `null` so the invalidation is visible at the call
+     * site rather than relying on `RouteMemo`'s default arguments.
+     * The new pattern is compiled immediately so the first `match()`
+     * on the clone is O(1); the registration order is preserved
+     * through the prefix change.
+     *
+     * @return self A new route instance with the same method, handler,
+     *     constraints, and registration order; the path is `$prefix . path`.
      */
     public function withPrefix(string $prefix): self
     {

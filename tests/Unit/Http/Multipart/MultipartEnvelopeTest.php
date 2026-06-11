@@ -118,7 +118,7 @@ final class MultipartEnvelopeTest extends TestCase
         );
 
         $this->expectException(BadRequestHttpException::class);
-        $this->expectExceptionMessage('Content-Length header is not numeric: garbage');
+        $this->expectExceptionMessage('Content-Length header is not a non-negative integer: garbage');
 
         MultipartEnvelope::assertContentLengthMatches($request);
     }
@@ -137,12 +137,12 @@ final class MultipartEnvelopeTest extends TestCase
         );
 
         $this->expectException(BadRequestHttpException::class);
-        $this->expectExceptionMessage('Content-Length header is not numeric: 1.5GB_string');
+        $this->expectExceptionMessage('Content-Length header is not a non-negative integer: 1.5GB_string');
 
         MultipartEnvelope::assertContentLengthMatches($request);
     }
 
-    public function testAssertContentLengthMatchesAcceptsScientificNotation(): void
+    public function testAssertContentLengthMatchesRejectsScientificNotation(): void
     {
         $request = new Request(
             'POST',
@@ -152,15 +152,16 @@ final class MultipartEnvelopeTest extends TestCase
                 'content-type' => 'multipart/form-data; boundary=X',
                 'content-length' => '1e3',
             ],
-            str_repeat('x', (int) '1e3'),
+            str_repeat('x', 1000),
         );
 
-        MultipartEnvelope::assertContentLengthMatches($request);
+        $this->expectException(BadRequestHttpException::class);
+        $this->expectExceptionMessage('Content-Length header is not a non-negative integer: 1e3');
 
-        $this->expectNotToPerformAssertions();
+        MultipartEnvelope::assertContentLengthMatches($request);
     }
 
-    public function testAssertContentLengthMatchesAcceptsWhitespacePaddedNumeric(): void
+    public function testAssertContentLengthMatchesRejectsWhitespacePaddedNumeric(): void
     {
         $request = new Request(
             'POST',
@@ -173,8 +174,9 @@ final class MultipartEnvelopeTest extends TestCase
             'hello',
         );
 
-        MultipartEnvelope::assertContentLengthMatches($request);
+        $this->expectException(BadRequestHttpException::class);
+        $this->expectExceptionMessage('Content-Length header is not a non-negative integer:   5  ');
 
-        $this->expectNotToPerformAssertions();
+        MultipartEnvelope::assertContentLengthMatches($request);
     }
 }

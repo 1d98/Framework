@@ -39,7 +39,7 @@ final class CorsMiddleware implements MiddlewareInterface
             return $this->callNext($request, $next);
         }
 
-        $origin = trim($rawOrigin);
+        $origin = strtolower(trim($rawOrigin));
         if ($origin === '') {
             return $this->callNext($request, $next);
         }

@@ -183,7 +183,11 @@ final readonly class Request
 
     /**
      * Backward-compat shim for tests that exercise the body cap against
-     * a synthetic stream. Delegates to {@see RequestFactory::readStreamWithCap()}.
+     * a synthetic stream. Delegates to
+     * {@see RequestFactory::readStreamWithCap()}; new code should call
+     * the factory method directly.
+     *
+     * @see RequestFactory::readStreamWithCap()
      *
      * @param resource $stream
      */
@@ -470,6 +474,9 @@ final readonly class Request
      *     `RequestHost` VO. This method is kept as a thin wrapper for
      *     backward compatibility; it will be removed in the next
      *     minor release.
+     *
+     * @internal Kept for backward compatibility only; new code must
+     *     use {@see self::withHost()} with a {@see RequestHost}.
      */
     public function withTrustedProxies(?array $trustedProxies): self
     {

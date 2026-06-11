@@ -19,20 +19,20 @@ final class StatusTextTest extends TestCase
         self::assertSame("I'm a teapot", StatusText::for(418));
     }
 
-    public function testUnknownCodeReturnsUnknown(): void
+    public function testUnknownCodeReturnsNull(): void
     {
-        self::assertSame('Unknown', StatusText::for(999));
+        self::assertNull(StatusText::for(999));
     }
 
-    public function testNegativeCodeReturnsUnknown(): void
+    public function testNegativeCodeReturnsNull(): void
     {
-        self::assertSame('Unknown', StatusText::for(-1));
-        self::assertSame('Unknown', StatusText::for(-404));
+        self::assertNull(StatusText::for(-1));
+        self::assertNull(StatusText::for(-404));
     }
 
-    public function testZeroCodeReturnsUnknown(): void
+    public function testZeroCodeReturnsNull(): void
     {
-        self::assertSame('Unknown', StatusText::for(0));
+        self::assertNull(StatusText::for(0));
     }
 
     public function testAllRegisteredCodesReturnNonEmptyStrings(): void
@@ -42,10 +42,9 @@ final class StatusTextTest extends TestCase
 
         foreach ($registered as $code) {
             $reason = StatusText::for($code);
-            self::assertNotSame(
-                'Unknown',
+            self::assertNotNull(
                 $reason,
-                "Code {$code} is in the IANA registry and must not fall back to 'Unknown'",
+                "Code {$code} is in the IANA registry and must not fall back to null",
             );
             self::assertNotSame('', $reason, "Code {$code} returned an empty reason phrase");
         }

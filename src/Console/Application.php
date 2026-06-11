@@ -25,6 +25,14 @@ final class Application
 
     private readonly StackTraceFormatter $traceFormatter;
 
+    /**
+     * @param ?bool $debug Default debug flag. When `null` (default),
+     *     {@see self::isDebug()} falls back to the `APP_DEBUG` env var.
+     *     `null` is the right choice for entry points that already
+     *     resolve debug state from the environment; pass an explicit
+     *     value when the caller has a stronger signal (e.g. a config
+     *     file or an embedding framework).
+     */
     public function __construct(
         private readonly ContainerInterface $container,
         private readonly string $name = 'Framework Console',

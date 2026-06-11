@@ -74,9 +74,9 @@ final class MultipartEnvelope
             return;
         }
 
-        if (!is_numeric($declared)) {
+        if (!ctype_digit($declared)) {
             throw new BadRequestHttpException(
-                'Content-Length header is not numeric: ' . $declared,
+                'Content-Length header is not a non-negative integer: ' . $declared,
             );
         }
 

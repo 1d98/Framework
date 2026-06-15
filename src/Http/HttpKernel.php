@@ -21,6 +21,8 @@ final class HttpKernel
 
     private readonly RequestErrorRenderer $errorRenderer;
 
+    private readonly ?StructuredErrorRenderer $structuredRenderer;
+
     private readonly RequestLogger $requestLogger;
 
     private readonly ?LoggerInterface $logger;
@@ -33,9 +35,14 @@ final class HttpKernel
         private readonly bool $debug = false,
         ?RequestErrorRenderer $errorRenderer = null,
         ?RequestLogger $requestLogger = null,
+        ?StructuredErrorRenderer $structuredRenderer = null,
     ) {
         $this->pipeline = $pipeline ?? new Pipeline($container);
+        // Build a default `RequestErrorRenderer` so legacy callers that
+        // do not opt into `StructuredErrorRenderer` keep getting the
+        // exact same shape they have been getting since 0.5.x.
         $this->errorRenderer = $errorRenderer ?? new RequestErrorRenderer($debug);
+        $this->structuredRenderer = $structuredRenderer;
         $this->requestLogger = $requestLogger ?? new RequestLogger($logger);
         $this->logger = $logger;
     }
@@ -44,12 +51,21 @@ final class HttpKernel
     {
         $core = $this->core();
         try {
-            return $this->pipeline->process($request, $core)->withRequestId($request->id);
+            $response = $this->pipeline->process($request, $core);
+            return $response->withRequestId($request->id);
         } catch (Throwable $e) {
-            $response = $this->errorRenderer->render($e, $request);
+            $response = $this->renderError($e, $request);
             $this->logFailure($e, $request, $response);
             return $response;
         }
+    }
+
+    private function renderError(Throwable $e, Request $request): Response
+    {
+        if ($this->structuredRenderer !== null) {
+            return $this->structuredRenderer->render($e, $request);
+        }
+        return $this->errorRenderer->render($e, $request);
     }
 
     private function core(): callable

@@ -16,8 +16,10 @@ use Framework\Console\Command\Make\MakeExceptionCommand;
 use Framework\Console\Command\Make\MakeMiddlewareCommand;
 use Framework\Console\Command\Make\MakeRuleCommand;
 use Framework\Console\Command\RoutesListCommand;
+use Framework\Console\Command\RoutesOpenApiCommand;
 use Framework\Container\Container;
 use Framework\Http\Router\Router;
+use Framework\OpenApi\OpenApiExporter;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -98,6 +100,15 @@ $app
     ->add(new ListCommand($container, $app))
     ->add(new ConfigShowCommand($container, $container->get(ConfigInterface::class)))
     ->add(new RoutesListCommand($container, $container->get(Router::class)))
+    ->add(new RoutesOpenApiCommand(
+        $container,
+        $container->get(Router::class),
+        new OpenApiExporter(
+            title: 'Framework Console',
+            version: \Framework\Framework::VERSION,
+            description: 'Auto-generated from the registered route table.',
+        ),
+    ))
     ->add(new AppSecretCommand($container))
     ->add(new MakeCommandCommand(
         $container,

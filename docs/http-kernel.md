@@ -17,21 +17,93 @@ final class HttpKernel
         private readonly bool $debug = false,
         ?RequestErrorRenderer $errorRenderer = null,
         ?RequestLogger $requestLogger = null,
+        ?StructuredErrorRenderer $structuredRenderer = null,
     ) {}
 
     public function handle(Request $request): Response { ... }
 }
 ```
 
-The full source is [`src/Http/HttpKernel.php`](../../src/Http/HttpKernel.php) (93 lines). The contract is:
+The full source is [`src/Http/HttpKernel.php`](../../src/Http/HttpKernel.php) (≈120 lines). The contract is:
 
 1. Build the pipeline (default: empty `new Pipeline($container)`).
 2. Call `handle($request)`.
 3. The pipeline runs the registered middlewares around the **core**, which calls `Router::match($request)` and invokes the matched handler.
-4. Any uncaught `Throwable` reaches `RequestErrorRenderer` and becomes an `application/problem+json` response.
+4. Any uncaught `Throwable` reaches `StructuredErrorRenderer` (when supplied) or the legacy `RequestErrorRenderer` and becomes an `application/problem+json` response.
 5. The response gets `X-Request-Id` set from `Request::$id`.
 
-`HttpKernel` always builds a default `RequestErrorRenderer` and `RequestLogger` — pass your own to override.
+`HttpKernel` always builds a default `RequestErrorRenderer` and `RequestLogger` — pass your own to override. To upgrade the error renderer, pass a `StructuredErrorRenderer` (see below); legacy `RequestErrorRenderer` is still used when no `StructuredErrorRenderer` is supplied, so existing code is unchanged.
+
+## Error rendering
+
+The kernel ships two renderers. Pick one based on whether you need request/trace correlation and a `redactTrace` knob.
+
+### `RequestErrorRenderer` (legacy, default)
+
+The minimal renderer. Emits an `application/problem+json` body with `type`, `title`, `status`, `detail`, `instance` and (for 4xx validation) `errors[]`. The response gets `X-Request-Id` set from `Request::$id`. No trace context.
+
+### `StructuredErrorRenderer` (recommended for production)
+
+Adds three orthogonal knobs to the legacy renderer:
+
+| Knob | Default | Effect |
+|---|---|---|
+| `includeRequestId` | `true` | `X-Request-Id` header + `requestId` body field |
+| `includeTraceId` | `true` | Parses incoming `traceparent` (or mints one), emits `traceparent` header + `traceId` body field |
+| `redactTrace` | `true` | Suppresses the `trace` stack-frame array in 5xx bodies, even when `debug: true` |
+| `exposeType` | `false` | Hides the `type` body field for a cleaner non-debug response (`about:blank` is implied per RFC 7807) |
+
+Wire it in:
+
+```php
+use Framework\Http\StructuredErrorRenderer;
+
+$kernel = new HttpKernel(
+    router: $router,
+    logger: $logger,
+    debug: (bool) getenv('APP_DEBUG'),
+    structuredRenderer: new StructuredErrorRenderer(
+        debug: (bool) getenv('APP_DEBUG'),
+        // redactTrace defaults to true; explicit for clarity
+        redactTrace: !(bool) getenv('APP_DEBUG'),
+    ),
+);
+```
+
+A 5xx in non-debug mode now returns:
+
+```http
+HTTP/1.1 500 Internal Server Error
+Content-Type: application/problem+json
+X-Request-Id: 0a1b2c3d4e5f6a7b
+traceparent: 00-aaaabbbbccccddddeeeeffffaaaabbbb-1111222233334444-01
+
+{
+  "title": "Internal Server Error",
+  "status": 500,
+  "detail": "Internal Server Error",
+  "instance": "/api/orders",
+  "requestId": "0a1b2c3d4e5f6a7b",
+  "traceId": "aaaabbbbccccddddeeeeffffaaaabbbb"
+}
+```
+
+In debug mode the `type` field appears (`"about:blank"` by default, or your custom `HttpException::type`) and the `trace` field lists the stack frames — unless `redactTrace: true` is set, in which case the trace is suppressed regardless of debug.
+
+### Trace propagation
+
+`StructuredErrorRenderer` parses the W3C `traceparent` header on the incoming request:
+
+```
+traceparent: 00-aaaabbbbccccddddeeeeffffaaaabbbb-1111222233334444-01
+```
+
+If the header is well-formed, the `traceId` in the response body matches the upstream trace id. If it is missing, malformed, or has the wrong field widths, a fresh `TraceContext::mint()` is generated with `random_bytes` (16-byte trace id, 8-byte span id). The framework never fails a request because of a bad upstream header.
+
+The trace id propagates through:
+- `traceparent` response header (so the next service in the chain can keep the same trace)
+- `traceId` body field (so a developer reading a 500 in their console can grep the access log for the same trace)
+- The `TraceContext` value object (so any other middleware that needs it can ask `Request::getAttribute('trace_context')` — wiring that in is a 3-line change in your middleware)
 
 ## The pipeline
 

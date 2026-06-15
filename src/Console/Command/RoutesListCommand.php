@@ -25,12 +25,19 @@ final class RoutesListCommand extends Command
 
     public function description(): string
     {
-        return 'Show all registered HTTP routes';
+        return 'Show all registered HTTP routes (--json for machine-readable export)';
     }
 
     public function execute(InputInterface $input, OutputInterface $output): int
     {
-        $routes = $this->router->all();
+        $routes = $this->router->allDetailed();
+
+        $jsonFlag = $input->option('json');
+        if (in_array($jsonFlag, ['true', '1'], true)) {
+            $output->write(json_encode($routes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) ?: '');
+            return 0;
+        }
+
         $rows = array_map(
             static fn(array $r): array => [(string) $r['method'], (string) $r['path']],
             $routes,

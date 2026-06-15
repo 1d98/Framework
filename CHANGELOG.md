@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-15
+
+### Added
+- **`AtomicFilesystem`** in `src/Filesystem/` — atomic write (`tmp` + `rename` so a reader never sees a half-written file) and exclusive `flock` wrapper. Reusable primitive for cache, idempotency, and job-queue code. File `0600`, parent dir `0700`. **In-process only for `flock` semantics** — for multi-host coordination, use Redis / Memcached.
+- **`StructuredErrorRenderer`** with W3C-tracecontext propagation: emits `traceparent` header + `traceId` body field, plus `requestId`. Replaces `RequestErrorRenderer` when wired into `HttpKernel` (the legacy renderer is still the default for backward compatibility). Knobs: `includeRequestId`, `includeTraceId`, `redactTrace` (suppresses stack-frame leakage in non-debug), `exposeType` (RFC 7807 `type` field).
+- **`RateLimitMiddleware` response headers** — `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` (Unix epoch), `X-RateLimit-Scope` on every response; `Retry-After` on 429 (RFC 6585 / 7231). New ctor args: `policyResolver` for per-route policies, `maxRetryAfter` clamp. Per-policy bucket space (`<ip>:<scope>`) so `/login` and `/api/` can have independent limits.
+- **`EtagMiddleware`** — RFC 7232 conditional GET. Computes `ETag` from the response body (`xxh128` by default, `sha256` available), short-circuits `If-None-Match` with `304 Not Modified`, enforces `If-Match` (412) on paths listed in `EtagPolicy::$ifMatchPaths`. Per-route opt-out via `$policy->skip`. Strong by default; `W/`-prefixed weak etags available.
+- **`OpenApiExporter`** + `routes:openapi` command — derives an OpenAPI 3.1 document from the registered route table. Path parameters + `where()` constraints are emitted automatically; `requestBody` / `responses` / `security` are attached by a user-supplied `operationDecorator` closure. Spec compliance verified by JSON-Schema round-trip in tests.
+- **`routes:list --json`** — machine-readable export of the route table (`method`, `path`, `params`, `where`). Drives CI route linting, scripts, and feeds the `OpenApiExporter`.
+- **`IdempotencyKeyMiddleware`** — Stripe-style safe POST replay. First request with a given `Idempotency-Key` runs the handler; retries within the TTL window replay the captured response verbatim (status, body, headers, `Set-Cookie`). Body-hash mismatch returns `422`; in-flight collision returns `409`; missing key on a required method returns `400`. Two store adapters ship in-tree: `InMemoryIdempotencyStore` (per-process) and `FilesystemIdempotencyStore` (per-host, atomic-rename + `flock(LOCK_NB)`).
+- **`PreconditionFailedHttpException`** (412) for `EtagMiddleware` `If-Match` enforcement.
+- **Docs:** `docs/filesystem.md` covers `AtomicFilesystem`; the existing `http-kernel.md` was extended with the new error renderer; `validation.md` got the new "Unresolved rules" section.
+
+### Changed
+- **`Router`** — added `Router::allDetailed()` (returns `{method, path, params, where}` per route) and `Route::getConstraints()` accessor so external consumers (OpenAPI exporter, `routes:list --json`) can read the per-parameter regex fragments without reflecting on a private field.
+- **`TooManyRequestsHttpException`** — new optional ctor arg `?int $retryAfter` carries the `Retry-After` header value. The exception's `headers()` method emits `Retry-After: <seconds>` automatically.
+- **`HttpKernel`** — added optional ctor arg `?StructuredErrorRenderer $structuredRenderer`; when set, replaces the legacy `RequestErrorRenderer` for error rendering. Legacy callers (no arg) keep getting the same shape.
+- **`HttpException::STATUS_TEXTS`** — added `412 => 'Precondition Failed'`.
+
+### Fixed
+- `AtomicFilesystem` rejects NUL bytes in paths and over-long paths up front (defense in depth against NUL-injection and accidental 4KB paths).
+- The structured error renderer never leaks stack frames when `redactTrace: true` is set, even if `debug: true` is also set.
+
+### Backwards compatibility
+- No breaking changes. Every new feature is opt-in: a new middleware is not piped unless you wire it; `StructuredErrorRenderer` is not used unless you pass it to `HttpKernel`; `RateLimitMiddleware` still works exactly as before when `policyResolver` is not supplied. The `usesAnsi` → `useAnsi` rename from 0.5.4 remains the only interface change in this release cycle.
+
 ## [0.5.5] - 2026-06-15
 
 ### Fixed
@@ -112,4 +138,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.5.3]: https://github.com/1d98/framework/releases/tag/v0.5.3
 [0.5.4]: https://github.com/1d98/framework/releases/tag/v0.5.4
 [0.5.5]: https://github.com/1d98/framework/releases/tag/v0.5.5
-[Unreleased]: https://github.com/1d98/framework/compare/v0.5.5...HEAD
+[0.6.0]: https://github.com/1d98/framework/releases/tag/v0.6.0
+[Unreleased]: https://github.com/1d98/framework/compare/v0.6.0...HEAD

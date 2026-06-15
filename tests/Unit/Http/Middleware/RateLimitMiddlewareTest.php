@@ -7,6 +7,7 @@ namespace Framework\Tests\Unit\Http\Middleware;
 use Framework\Clock\FakeClock;
 use Framework\Http\Exception\TooManyRequestsHttpException;
 use Framework\Http\Middleware\RateLimitMiddleware;
+use Framework\Http\Middleware\RateLimitPolicy;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
 use InvalidArgumentException;
@@ -291,7 +292,7 @@ final class RateLimitMiddlewareTest extends TestCase
     {
         $clock = new FakeClock(0.0);
         $middleware = new RateLimitMiddleware(
-            capacity: 1,
+            capacity: 5,
             refillPerSecond: 1.0,
             clock: $clock,
             bucketTtl: 60,
@@ -300,13 +301,13 @@ final class RateLimitMiddlewareTest extends TestCase
         $request = $this->requestFromIp(self::IP_A);
         $middleware->process($request, static fn(): Response => Response::empty(204));
 
-        self::assertArrayHasKey(self::IP_A, $this->bucketsSnapshot());
+        self::assertArrayHasKey(self::IP_A . ':default', $this->bucketsSnapshot());
 
         $clock->advance(120.0);
         $removed = $middleware->sweep();
 
         self::assertSame(1, $removed);
-        self::assertArrayNotHasKey(self::IP_A, $this->bucketsSnapshot());
+        self::assertArrayNotHasKey(self::IP_A . ':default', $this->bucketsSnapshot());
     }
 
     public function testSweepKeepsActiveBuckets(): void
@@ -328,7 +329,7 @@ final class RateLimitMiddlewareTest extends TestCase
         $removed = $middleware->sweep();
 
         self::assertSame(0, $removed);
-        self::assertArrayHasKey(self::IP_A, $this->bucketsSnapshot());
+        self::assertArrayHasKey(self::IP_A . ':default', $this->bucketsSnapshot());
     }
 
     public function testSweepIsAmortizedAcrossRequests(): void
@@ -473,29 +474,194 @@ final class RateLimitMiddlewareTest extends TestCase
         $hasSwept->setValue(null, false);
     }
 
+    public function testSuccessResponseCarriesRateLimitHeaders(): void
+    {
+        $clock = new FakeClock(0.001);
+        $middleware = new RateLimitMiddleware(
+            capacity: 10,
+            refillPerSecond: 1.0,
+            clock: $clock,
+        );
+        $request = $this->requestFromIp(self::IP_A);
+
+        $response = $middleware->process($request, static fn(): Response => Response::empty(204));
+
+        self::assertSame('10', $response->headers['X-RateLimit-Limit']);
+        self::assertSame('9', $response->headers['X-RateLimit-Remaining']);
+        self::assertSame('default', $response->headers['X-RateLimit-Scope']);
+        self::assertIsString($response->headers['X-RateLimit-Reset']);
+        self::assertGreaterThan(0, (int) $response->headers['X-RateLimit-Reset']);
+    }
+
+    public function testThrottledResponseCarriesRetryAfter(): void
+    {
+        $clock = new FakeClock(0.001);
+        $middleware = new RateLimitMiddleware(
+            capacity: 1,
+            refillPerSecond: 0.5,  // 2-second refill
+            clock: $clock,
+        );
+        $request = $this->requestFromIp(self::IP_A);
+
+        $middleware->process($request, static fn(): Response => Response::empty(204));
+
+        try {
+            $middleware->process($request, static fn(): Response => Response::empty(204));
+            self::fail('Expected TooManyRequestsHttpException');
+        } catch (TooManyRequestsHttpException $e) {
+            self::assertSame(429, $e->statusCode);
+            self::assertSame('2', $e->headers()['Retry-After']);
+        }
+    }
+
+    public function testRetryAfterIsCeiledNotFractional(): void
+    {
+        $clock = new FakeClock(0.001);
+        $middleware = new RateLimitMiddleware(
+            capacity: 1,
+            refillPerSecond: 3.0,  // 1/3 second per token
+            clock: $clock,
+        );
+        $request = $this->requestFromIp(self::IP_A);
+
+        $middleware->process($request, static fn(): Response => Response::empty(204));
+
+        try {
+            $middleware->process($request, static fn(): Response => Response::empty(204));
+            self::fail('Expected TooManyRequestsHttpException');
+        } catch (TooManyRequestsHttpException $e) {
+            // 1 token / 3 per second = 1/3 second, ceil = 1
+            self::assertSame('1', $e->headers()['Retry-After']);
+        }
+    }
+
+    public function testRetryAfterClampedToMaxRetryAfter(): void
+    {
+        $clock = new FakeClock(0.001);
+        $middleware = new RateLimitMiddleware(
+            capacity: 1,
+            refillPerSecond: 0.0001,  // absurdly slow
+            clock: $clock,
+            maxRetryAfter: 60,
+        );
+        $request = $this->requestFromIp(self::IP_A);
+
+        $middleware->process($request, static fn(): Response => Response::empty(204));
+
+        try {
+            $middleware->process($request, static fn(): Response => Response::empty(204));
+            self::fail('Expected TooManyRequestsHttpException');
+        } catch (TooManyRequestsHttpException $e) {
+            self::assertSame('60', $e->headers()['Retry-After']);
+        }
+    }
+
+    public function testPolicyResolverSelectsPerRouteBucket(): void
+    {
+        $clock = new FakeClock(0.001);
+        $middleware = new RateLimitMiddleware(
+            capacity: 2,
+            refillPerSecond: 1.0,
+            clock: $clock,
+            policyResolver: static fn(Request $r, string $routePath): RateLimitPolicy => str_starts_with($routePath, '/login')
+                ? new RateLimitPolicy(capacity: 1, refillPerSecond: 0.1, scope: 'login')
+                : new RateLimitPolicy(capacity: 100, refillPerSecond: 10.0, scope: 'default'),
+        );
+
+        // /login request 1: pass, scope=login
+        $loginReq = $this->requestFromIp(self::IP_A);
+        $loginReq = $loginReq->withAttribute('routed_path', '/login');
+        $r1 = $middleware->process($loginReq, static fn(): Response => Response::empty(204));
+        self::assertSame('1', $r1->headers['X-RateLimit-Limit']);
+        self::assertSame('login', $r1->headers['X-RateLimit-Scope']);
+
+        // /login request 2: throttled (login policy capacity=1)
+        try {
+            $middleware->process($loginReq, static fn(): Response => Response::empty(204));
+            self::fail('Expected TooManyRequestsHttpException for second /login');
+        } catch (TooManyRequestsHttpException) {
+            // expected
+        }
+
+        // /api/users request: passes, default policy (capacity=100, different bucket)
+        $apiReq = $this->requestFromIp(self::IP_A);
+        $apiReq = $apiReq->withAttribute('routed_path', '/api/users');
+        $r2 = $middleware->process($apiReq, static fn(): Response => Response::empty(204));
+        self::assertSame('100', $r2->headers['X-RateLimit-Limit']);
+        self::assertSame('default', $r2->headers['X-RateLimit-Scope']);
+    }
+
+    public function testBackwardCompatibleWithoutPolicyResolver(): void
+    {
+        $clock = new FakeClock(0.001);
+        $middleware = new RateLimitMiddleware(
+            capacity: 5,
+            refillPerSecond: 1.0,
+            clock: $clock,
+        );
+        $request = $this->requestFromIp(self::IP_A);
+
+        $response = $middleware->process($request, static fn(): Response => Response::empty(204));
+
+        // Legacy header: scope must be 'default' when no resolver supplied
+        self::assertSame('default', $response->headers['X-RateLimit-Scope']);
+        self::assertSame('5', $response->headers['X-RateLimit-Limit']);
+    }
+
+    public function testMaxRetryAfterRejectsZero(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new RateLimitMiddleware(maxRetryAfter: 0);
+    }
+
+    public function testResetEpochInFuture(): void
+    {
+        $clock = new FakeClock(1000.0);
+        $middleware = new RateLimitMiddleware(
+            capacity: 10,
+            refillPerSecond: 1.0,
+            clock: $clock,
+        );
+        $request = $this->requestFromIp(self::IP_A);
+
+        $response = $middleware->process($request, static fn(): Response => Response::empty(204));
+
+        // 9 tokens remaining → 1 second to refill → Reset ≈ 1001
+        $reset = (int) $response->headers['X-RateLimit-Reset'];
+        self::assertGreaterThanOrEqual(1000, $reset);
+        self::assertLessThanOrEqual(1001, $reset);
+    }
+
     /**
-     * @return array{tokens: float, updated: float}
+     * @return array{tokens: float, updated: float, capacity: int, refill: float, scope: string}
      */
     private function bucketSnapshot(string $ip): array
     {
         $ref = new ReflectionClass(RateLimitMiddleware::class);
         $prop = $ref->getProperty('buckets');
-        /** @var array<string, array{tokens: float, updated: float}> $buckets */
+        /** @var array<string, array{tokens: float, updated: float, capacity: int, refill: float, scope: string}> $buckets */
         $buckets = $prop->getValue();
-        self::assertArrayHasKey($ip, $buckets, "No bucket for IP {$ip}");
-        /** @var array{tokens: float, updated: float} $bucket */
-        $bucket = $buckets[$ip];
-        return $bucket;
+        // Bucket keys are `<ip>:<scope>`. For the legacy default-scope
+        // tests, the scope is `default` — match on the prefix.
+        $matchedKey = null;
+        foreach ($buckets as $key => $bucket) {
+            if ($key === $ip || str_starts_with($key, $ip . ':')) {
+                $matchedKey = $key;
+                break;
+            }
+        }
+        self::assertNotNull($matchedKey, "No bucket for IP {$ip}");
+        return $buckets[$matchedKey];
     }
 
     /**
-     * @return array<string, array{tokens: float, updated: float}>
+     * @return array<string, array{tokens: float, updated: float, capacity: int, refill: float, scope: string}>
      */
     private function bucketsSnapshot(): array
     {
         $ref = new ReflectionClass(RateLimitMiddleware::class);
         $prop = $ref->getProperty('buckets');
-        /** @var array<string, array{tokens: float, updated: float}> $buckets */
+        /** @var array<string, array{tokens: float, updated: float, capacity: int, refill: float, scope: string}> $buckets */
         $buckets = $prop->getValue();
         return $buckets;
     }

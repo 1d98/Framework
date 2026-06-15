@@ -210,6 +210,49 @@ final class Router implements RouterInterface
     }
 
     /**
+     * Detailed route export: method, path, extracted path-parameter
+     * names, and per-parameter regex constraints from `where()`.
+     * Used by `routes:list --json` and by {@see \Framework\OpenApi\OpenApiExporter}.
+     *
+     * @return list<array{
+     *   method: string,
+     *   path: string,
+     *   params: list<string>,
+     *   where: array<string, string>
+     * }>
+     */
+    public function allDetailed(): array
+    {
+        $out = [];
+        foreach ($this->getRoutes() as $route) {
+            $out[] = [
+                'method' => $route->method,
+                'path' => $route->path,
+                'params' => self::extractPathParams($route->path),
+                'where' => $route->getConstraints(),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Extract `{name}` path-parameter names from a route path.
+     *
+     * @return list<string>
+     */
+    private static function extractPathParams(string $path): array
+    {
+        $names = [];
+        $count = preg_match_all('/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/', $path, $matches);
+        if ($count !== false) {
+            foreach ($matches[1] as $name) {
+                $names[] = $name;
+            }
+        }
+        return $names;
+    }
+
+    /**
      * Return a new Router with the given strict-mode flag and the current
      * route table copied over. Counters and the routes cache are also
      * copied so a caller can branch off a pre-populated router (e.g. for

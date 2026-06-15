@@ -9,14 +9,24 @@ use Framework\Http\Exception\InternalServerErrorHttpException;
 use Framework\Http\Exception\MethodNotAllowedHttpException;
 use Framework\Http\Exception\UnprocessableEntityHttpException;
 use Framework\Http\Response\Response;
+use Framework\Http\TraceContext;
 use Throwable;
 
 final readonly class ProblemDetails
 {
+    /**
+     * @param string|null $requestId Snapshot of `$request->id` at
+     *     error-render time. When non-null, emitted as a
+     *     `requestId` field in the body. Independent of
+     *     `traceparent` (which is the W3C-style distributed
+     *     trace identifier).
+     */
     public function __construct(
         private Throwable $exception,
         private string $instance,
         private bool $debug,
+        private ?string $requestId = null,
+        private ?TraceContext $traceContext = null,
     ) {
     }
 
@@ -104,6 +114,12 @@ final readonly class ProblemDetails
             }
         }
 
+        if ($this->traceContext !== null) {
+            foreach ($this->traceContext->toW3CHeaders() as $name => $value) {
+                $headers[$name] = $value;
+            }
+        }
+
         return $headers;
     }
 
@@ -119,6 +135,14 @@ final readonly class ProblemDetails
             'detail' => $this->detail(),
             'instance' => $this->instance,
         ];
+
+        if ($this->requestId !== null) {
+            $body['requestId'] = $this->requestId;
+        }
+
+        if ($this->traceContext !== null) {
+            $body['traceId'] = $this->traceContext->traceId;
+        }
 
         $trace = $this->trace();
         if ($trace !== null) {
@@ -150,6 +174,12 @@ final readonly class ProblemDetails
                 'detail' => 'ProblemDetails body is not JSON-encodable: ' . $e->getMessage(),
                 'instance' => $this->instance,
             ];
+            if ($this->requestId !== null) {
+                $fallback['requestId'] = $this->requestId;
+            }
+            if ($this->traceContext !== null) {
+                $fallback['traceId'] = $this->traceContext->traceId;
+            }
             $body = json_encode($fallback, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             if ($body === false) {
                 // Truly unrecoverable: the static fallback string itself is somehow

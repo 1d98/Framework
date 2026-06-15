@@ -208,6 +208,19 @@ final class Route
     }
 
     /**
+     * @return array<string, string> Per-parameter regex fragments
+     *     installed via {@see self::where()}. Empty when no
+     *     constraints have been set. The Router exposes this
+     *     through {@see \Framework\Http\Router\Router::allDetailed()}
+     *     so external consumers (OpenAPI exporter, `routes:list --json`)
+     *     can read the same shape without reflecting.
+     */
+    public function getConstraints(): array
+    {
+        return $this->constraints;
+    }
+
+    /**
      * @return Closure(Request, array<string, string>): Response
      */
     public function handler(): Closure

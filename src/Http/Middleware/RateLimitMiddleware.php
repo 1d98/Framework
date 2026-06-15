@@ -77,14 +77,18 @@ final class RateLimitMiddleware implements MiddlewareInterface
     private const string UNKNOWN_KEY = 'unknown';
 
     /**
-     * Process-wide bucket store. Keyed by the resolved request key;
-     * each entry holds the current token count and the timestamp of
-     * the last refill. The `array` shape is intentionally
-     * not-generic: a single shape (`['tokens' => float, 'updated'
-     * => float]`) makes the storage trivial to swap to a different
+     * Process-wide bucket store. Keyed by `<ip>:<scope>` (or
+     * `<custom-key>:<scope>` when a `keyExtractor` is supplied).
+     * Each entry holds the current token count, the timestamp of
+     * the last refill, the policy's `capacity`, the policy's
+     * `refillPerSecond` rate, and the policy's `scope` (echoed in
+     * the `X-RateLimit-Scope` response header).
+     *
+     * The `array` shape is intentionally not-generic: a single
+     * shape makes the storage trivial to swap to a different
      * backend without touching the algorithm.
      *
-     * @var array<string, array{tokens: float, updated: float}>
+     * @var array<string, array{tokens: float, updated: float, capacity: int, refill: float, scope: string}>
      */
     private static array $buckets = [];
 
@@ -149,6 +153,23 @@ final class RateLimitMiddleware implements MiddlewareInterface
      *     (NFS may not honor `flock`); the file does not need to
      *     exist. Does NOT help across hosts — for that, use a
      *     shared store.
+     * @param ?Closure $policyResolver Optional
+     *     `(Request, routePath): RateLimitPolicy` that picks a
+     *     per-route policy. When set, the matched route path is
+     *     read off `$request` (the kernel stores the matched
+     *     path in the `routed_path` attribute when routing
+     *     succeeded; when not, the resolver receives `$request->path`).
+     *     The returned policy's `scope` is the per-bucket
+     *     namespace and is echoed in the `X-RateLimit-Scope`
+     *     response header. Default `null` — every request uses the
+     *     constructor `$capacity` / `$refillPerSecond` and the
+     *     `scope: 'default'` namespace (legacy behavior).
+     * @param int $maxRetryAfter Maximum value (in seconds) the
+     *     `Retry-After` header can take on a 429. Default 86400
+     *     (1 day). The header is `ceil(seconds-to-next-token)` and
+     *     is clamped to `[1, $maxRetryAfter]` to prevent leaking
+     *     a "retry in 30 years" or "retry in 0 seconds" response
+     *     to a misbehaving client.
      */
     public function __construct(
         private int $capacity = 60,
@@ -159,6 +180,8 @@ final class RateLimitMiddleware implements MiddlewareInterface
         private int $bucketTtl = 3600,
         private int $sweepInterval = 60,
         private ?string $lockPath = null,
+        private ?Closure $policyResolver = null,
+        private int $maxRetryAfter = 86400,
     ) {
         if ($capacity < 1) {
             throw new InvalidArgumentException('RateLimitMiddleware: capacity must be >= 1');
@@ -171,6 +194,9 @@ final class RateLimitMiddleware implements MiddlewareInterface
         }
         if ($sweepInterval < 1) {
             throw new InvalidArgumentException('RateLimitMiddleware: sweepInterval must be >= 1');
+        }
+        if ($maxRetryAfter < 1) {
+            throw new InvalidArgumentException('RateLimitMiddleware: maxRetryAfter must be >= 1');
         }
         $this->clock = $clock ?? new SystemClock();
     }
@@ -187,26 +213,59 @@ final class RateLimitMiddleware implements MiddlewareInterface
             );
         }
 
-        /** @var Response $response */
-        $response = $this->locked(function () use ($key, $now, $next, $request): Response {
-            $bucket = self::$buckets[$key] ?? ['tokens' => (float) $this->capacity, 'updated' => $now];
+        $policy = $this->resolvePolicy($request);
+        $bucketKey = $key . ':' . $policy->scope;
+
+        $throttleException = null;
+
+        $response = $this->locked(function () use ($bucketKey, $now, $next, $request, $policy, &$throttleException): Response {
+            $bucket = self::$buckets[$bucketKey] ?? [
+                'tokens' => (float) $policy->capacity,
+                'updated' => $now,
+                'capacity' => $policy->capacity,
+                'refill' => $policy->refillPerSecond,
+                'scope' => $policy->scope,
+            ];
 
             $elapsed = max(0.0, $now - $bucket['updated']);
-            $bucket['tokens'] = min((float) $this->capacity, $bucket['tokens'] + $elapsed * $this->refillPerSecond);
+            $bucket['tokens'] = min((float) $policy->capacity, $bucket['tokens'] + $elapsed * $policy->refillPerSecond);
 
             if ($bucket['tokens'] < 1.0) {
-                self::$buckets[$key] = $bucket;
-                throw new TooManyRequestsHttpException('Rate limit exceeded');
+                self::$buckets[$bucketKey] = $bucket;
+                $retryAfter = $this->computeRetryAfter($bucket['tokens'], $policy->refillPerSecond, $now);
+                $throttleException = new TooManyRequestsHttpException(
+                    'Rate limit exceeded',
+                    retryAfter: $retryAfter,
+                );
+                throw $throttleException;
             }
 
             $bucket['tokens'] -= 1.0;
             $bucket['updated'] = $now;
-            self::$buckets[$key] = $bucket;
+            self::$buckets[$bucketKey] = $bucket;
 
             /** @var Response $response */
             $response = $next($request);
-            return $response;
+            return $this->applyRateLimitHeaders(
+                response: $response,
+                policy: $policy,
+                tokensRemaining: $bucket['tokens'],
+                now: $now,
+                isThrottled: false,
+                retryAfter: null,
+            );
         });
+
+        if ($throttleException !== null) {
+            // The exception already carries `Retry-After` in its
+            // `headers()`; the kernel's error renderer picks it
+            // up via ProblemDetails::headers() and adds it to
+            // the 429 response. `X-RateLimit-*` headers are
+            // intentionally NOT added on the throttled path —
+            // RFC 6585 / 7231 require `Retry-After`; the rest
+            // are an informational convenience on success only.
+            throw $throttleException;
+        }
 
         return $response;
     }
@@ -268,6 +327,115 @@ final class RateLimitMiddleware implements MiddlewareInterface
             return $ip;
         }
         return $this->allowMissingKey ? self::UNKNOWN_KEY : null;
+    }
+
+    /**
+     * Resolve the per-route policy for a request. When a
+     * `policyResolver` was supplied at construction time, the
+     * matched route path is read off the request's `routed_path`
+     * attribute (the kernel stores it there after a successful
+     * match) and the closure is called. When no resolver is
+     * configured, the default `RateLimitPolicy` (built from the
+     * constructor's `$capacity` / `$refillPerSecond` / `scope:
+     * 'default'`) is returned, matching the legacy behavior.
+     */
+    private function resolvePolicy(Request $request): RateLimitPolicy
+    {
+        if ($this->policyResolver === null) {
+            return new RateLimitPolicy(
+                capacity: $this->capacity,
+                refillPerSecond: $this->refillPerSecond,
+                scope: 'default',
+            );
+        }
+
+        $routedPath = $request->getAttribute('routed_path');
+        $routePath = is_string($routedPath) && $routedPath !== '' ? $routedPath : $request->path;
+
+        $policy = ($this->policyResolver)($request, $routePath);
+        if (!$policy instanceof RateLimitPolicy) {
+            // A misbehaving resolver should never crash the request
+            // — fall back to the defaults so the limit still applies.
+            return new RateLimitPolicy(
+                capacity: $this->capacity,
+                refillPerSecond: $this->refillPerSecond,
+                scope: 'default',
+            );
+        }
+        return $policy;
+    }
+
+    /**
+     * Compute the `Retry-After` (in seconds) for a 429 response.
+     *
+     * The bucket has `tokens` < 1.0 right now. To get to 1 token
+     * (the next request that will be allowed), we need
+     * `(1 - tokens)` more tokens; at `refill` tokens per second,
+     * the wait is `(1 - tokens) / refill` seconds. `ceil()` so
+     * the client never gets `Retry-After: 0` (which RFC 7231
+     * treats as "retry immediately" and would just trigger the
+     * 429 again). The result is clamped to `[1, $maxRetryAfter]`.
+     */
+    private function computeRetryAfter(float $tokens, float $refill, float $now): int
+    {
+        $missing = max(0.0, 1.0 - $tokens);
+        $seconds = (int) ceil($missing / $refill);
+        if ($seconds < 1) {
+            $seconds = 1;
+        }
+        if ($seconds > $this->maxRetryAfter) {
+            $seconds = $this->maxRetryAfter;
+        }
+        return $seconds;
+    }
+
+    /**
+     * Compute the Unix timestamp at which the bucket is full again.
+     * If the bucket has `tokens` right now and the policy refills
+     * at `refill` tokens/second, the time to reach `capacity` is
+     * `(capacity - tokens) / refill` seconds from `now`. The return
+     * value is rounded up to the next whole second and matches the
+     * de-facto convention used by GitHub, Twitter, etc. for the
+     * `X-RateLimit-Reset` header.
+     */
+    private function computeResetEpoch(float $now, float $tokens, int $capacity, float $refill): int
+    {
+        if ($refill <= 0.0) {
+            return (int) ceil($now);
+        }
+        $missing = max(0.0, (float) $capacity - $tokens);
+        $seconds = (int) ceil($missing / $refill);
+        return (int) ceil($now) + $seconds;
+    }
+
+    /**
+     * Apply `X-RateLimit-Limit`, `X-RateLimit-Remaining`,
+     * `X-RateLimit-Reset`, and `X-RateLimit-Scope` to the response.
+     * On 429 (`isThrottled: true`), also add `Retry-After` with
+     * the pre-computed value.
+     */
+    private function applyRateLimitHeaders(
+        Response $response,
+        RateLimitPolicy $policy,
+        float $tokensRemaining,
+        float $now,
+        bool $isThrottled,
+        ?int $retryAfter,
+    ): Response {
+        $response = $response->withHeader('X-RateLimit-Limit', (string) $policy->capacity);
+        $response = $response->withHeader(
+            'X-RateLimit-Remaining',
+            (string) max(0, (int) floor($tokensRemaining)),
+        );
+        $response = $response->withHeader(
+            'X-RateLimit-Reset',
+            (string) $this->computeResetEpoch($now, $tokensRemaining, $policy->capacity, $policy->refillPerSecond),
+        );
+        $response = $response->withHeader('X-RateLimit-Scope', $policy->scope);
+        if ($isThrottled && $retryAfter !== null) {
+            $response = $response->withHeader('Retry-After', (string) $retryAfter);
+        }
+        return $response;
     }
 
     /**

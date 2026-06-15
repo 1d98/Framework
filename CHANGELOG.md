@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-15
+
+### Fixed
+- **`AtomicFilesystemTest::testListFilesYieldsRecursiveContents` test-only fix on Windows.** The previous 0.6.1 fix normalized the iterator output (replacing `\` with `/`) but did NOT normalize the expected paths. The expected `$this->tmpDir . '/a.txt'` may carry `\` from `realpath()` (on Windows) joined with `/`-style suffixes, producing mixed separators (`C:\Temp/foo`). Both sides of the assertion are now normalized to forward slashes; the comparison is platform-portable.
+
 ## [0.6.1] - 2026-06-15
 
 ### Fixed
@@ -150,4 +155,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.5.5]: https://github.com/1d98/framework/releases/tag/v0.5.5
 [0.6.0]: https://github.com/1d98/framework/releases/tag/v0.6.0
 [0.6.1]: https://github.com/1d98/framework/releases/tag/v0.6.1
-[Unreleased]: https://github.com/1d98/framework/compare/v0.6.1...HEAD
+[0.6.2]: https://github.com/1d98/framework/releases/tag/v0.6.2
+[Unreleased]: https://github.com/1d98/framework/compare/v0.6.2...HEAD

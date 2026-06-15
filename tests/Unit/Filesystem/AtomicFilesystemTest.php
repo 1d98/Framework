@@ -176,16 +176,24 @@ final class AtomicFilesystemTest extends TestCase
         $files = iterator_to_array(AtomicFilesystem::listFiles($this->tmpDir), false);
         sort($files);
 
-        // Normalize the OS-native separator in the iterator output
-        // (Windows `RecursiveDirectoryIterator` returns `\`, the
-        // expected paths use `/`) so the comparison is portable.
-        $files = array_map(static fn(string $p): string => str_replace('\\', '/', $p), $files);
+        // Normalize the OS-native separator in BOTH the iterator
+        // output and the expected paths. `RecursiveDirectoryIterator`
+        // on Windows returns `\`, but a `realpath()`-resolved
+        // `$this->tmpDir` joined with `/`-style segments can
+        // produce mixed separators (e.g. `C:\Temp/foo`). The
+        // platform-portable comparison is "forward-slash only".
+        $normalize = static fn(string $p): string => str_replace('\\', '/', $p);
+        $files = array_map($normalize, $files);
+        $expected = array_map(
+            $normalize,
+            [
+                $this->tmpDir . '/a.txt',
+                $this->tmpDir . '/sub/b.txt',
+                $this->tmpDir . '/sub/deep/c.txt',
+            ],
+        );
 
-        self::assertSame([
-            $this->tmpDir . '/a.txt',
-            $this->tmpDir . '/sub/b.txt',
-            $this->tmpDir . '/sub/deep/c.txt',
-        ], $files);
+        self::assertSame($expected, $files);
     }
 
     public function testListFilesOnMissingDirYieldsNothing(): void

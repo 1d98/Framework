@@ -78,6 +78,11 @@ final class AtomicFilesystem
     ): void {
         self::assertSafePath($path);
 
+        // Normalize to OS-native separators. The caller may pass
+        // a path with mixed `\` and `/` (e.g. an absolute path from
+        // `realpath` joined with a relative suffix), and Windows
+        // `rename()` chokes on the mismatch.
+        $path = str_replace('\\', '/', $path);
         $dir = dirname($path);
         self::ensureDirectory($dir, $dirMode);
 
@@ -165,6 +170,7 @@ final class AtomicFilesystem
     ): Lock {
         self::assertSafePath($path);
 
+        $path = str_replace('\\', '/', $path);
         $dir = dirname($path);
         self::ensureDirectory($dir, 0o700);
 

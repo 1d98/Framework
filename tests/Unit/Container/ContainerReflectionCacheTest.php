@@ -12,6 +12,12 @@ use ReflectionClass;
 #[CoversClass(Container::class)]
 final class ContainerReflectionCacheTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        Container::clearCaches();
+        parent::setUp();
+    }
+
     protected function tearDown(): void
     {
         Container::clearCaches();

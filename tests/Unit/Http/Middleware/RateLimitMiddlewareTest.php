@@ -333,7 +333,7 @@ final class RateLimitMiddlewareTest extends TestCase
 
     public function testSweepIsAmortizedAcrossRequests(): void
     {
-        $clock = new FakeClock(0.0);
+        $clock = new FakeClock(0.001);
         $middleware = new RateLimitMiddleware(
             capacity: 5,
             refillPerSecond: 1.0,
@@ -467,6 +467,10 @@ final class RateLimitMiddlewareTest extends TestCase
         $ref = new ReflectionClass(RateLimitMiddleware::class);
         $prop = $ref->getProperty('buckets');
         $prop->setValue(null, []);
+        $lastSweep = $ref->getProperty('lastSweepAt');
+        $lastSweep->setValue(null, 0.0);
+        $hasSwept = $ref->getProperty('hasSwept');
+        $hasSwept->setValue(null, false);
     }
 
     /**

@@ -192,12 +192,21 @@ final class NamespaceResolver
         return str_starts_with($path, $base . '/');
     }
 
+    /**
+     * Normalize a filesystem path to forward slashes and resolve symlinks
+     * via `realpath()`. The output form is canonical for internal comparisons:
+     * every `$absBase` and `$absTargetDir` in this class uses `/` as the
+     * separator, regardless of the host OS. Without the post-`realpath`
+     * `\\` → `/` conversion, `realpath()` on Windows returns backslashes
+     * and the `isUnder()` prefix check fails because it compares against
+     * `$base . '/'`.
+     */
     private function normalizePath(string $path): string
     {
         $path = str_replace('\\', '/', $path);
         $resolved = realpath($path);
         if (is_string($resolved)) {
-            $path = $resolved;
+            $path = str_replace('\\', '/', $resolved);
         }
         return rtrim($path, '/');
     }

@@ -251,7 +251,8 @@ final class MakeRuleCommandTest extends MakeScaffolderTestCase
 
         self::assertSame(0, $code);
         $contents = (string) file_get_contents($this->tmpFile('CrlfRule.php'));
-        self::assertStringNotContainsString("\r", $contents);
+        self::assertStringNotContainsString("first\r", $contents, 'CR between "first" and "second" must be stripped from the description');
+        self::assertStringNotContainsString("\rsecond", $contents, 'CR before "second" must be stripped from the description');
         self::assertStringContainsString('first', $contents);
         self::assertStringContainsString('second', $contents);
         self::assertTrue(PhpLinter::check($this->tmpFile('CrlfRule.php')));

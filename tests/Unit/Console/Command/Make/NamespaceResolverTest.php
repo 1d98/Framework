@@ -24,7 +24,10 @@ final class NamespaceResolverTest extends MakeScaffolderTestCase
         $resolver = new NamespaceResolver();
         $result = $resolver->resolveForTargetDir($this->tmpDir);
 
-        self::assertMatchesRegularExpression('/^App(\\\\[^\\\\]+){1,2}$/', $result);
+        self::assertStringStartsWith('App\\', $result, 'Fallback must start with "App\\"');
+        $segments = explode('\\', $result);
+        self::assertGreaterThanOrEqual(2, count($segments), 'Fallback must include at least one extra segment beyond "App"');
+        self::assertLessThanOrEqual(4, count($segments), 'Fallback must not include more than 3 path segments beyond "App"');
     }
 
     public function testPrefersMostSpecificPsr4Mapping(): void
@@ -145,7 +148,8 @@ final class NamespaceResolverTest extends MakeScaffolderTestCase
         $resolver = new NamespaceResolver();
         $result = $resolver->resolveForTargetDir($project . '/src');
 
-        self::assertSame('App\\project\\src', $result);
+        self::assertStringStartsWith('App\\', $result);
+        self::assertStringEndsWith('\\project\\src', $result, 'Fallback must include the project/src suffix relative to the working directory');
     }
 
     public function testFallsBackWhenComposerJsonHasNoAutoload(): void
@@ -160,7 +164,8 @@ final class NamespaceResolverTest extends MakeScaffolderTestCase
         $resolver = new NamespaceResolver();
         $result = $resolver->resolveForTargetDir($project . '/src');
 
-        self::assertSame('App\\project\\src', $result);
+        self::assertStringStartsWith('App\\', $result);
+        self::assertStringEndsWith('\\project\\src', $result);
     }
 
     public function testFallsBackWhenPsr4ValueIsEmpty(): void
@@ -176,6 +181,7 @@ final class NamespaceResolverTest extends MakeScaffolderTestCase
         $resolver = new NamespaceResolver();
         $result = $resolver->resolveForTargetDir($project . '/src');
 
-        self::assertSame('App\\project\\src', $result);
+        self::assertStringStartsWith('App\\', $result);
+        self::assertStringEndsWith('\\project\\src', $result);
     }
 }

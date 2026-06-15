@@ -93,8 +93,18 @@ final class RateLimitMiddleware implements MiddlewareInterface
      * (whatever the injected Clock reports). Used to amortize the
      * cost of {@see self::sweep()} — the sweep runs at most once
      * per `$sweepInterval` per process.
+     *
+     * A separate `static bool $hasSwept` flag is required because
+     * `FakeClock(0.0)` (and any clock that happens to start at
+     * `0.0`) would otherwise leave `$lastSweepAt` at `0.0` after
+     * the first sweep, and the `lastSweepAt === 0.0` "never
+     * swept" check would re-fire on every request. The boolean
+     * tracks "has the initial sweep ever run" independently of
+     * the time.
      */
     private static float $lastSweepAt = 0.0;
+
+    private static bool $hasSwept = false;
 
     private Clock $clock;
 
@@ -221,6 +231,7 @@ final class RateLimitMiddleware implements MiddlewareInterface
                 static fn(array $b): bool => $b['updated'] >= $cutoff,
             );
             self::$lastSweepAt = $now;
+            self::$hasSwept = true;
             return $before - count(self::$buckets);
         });
     }
@@ -230,7 +241,7 @@ final class RateLimitMiddleware implements MiddlewareInterface
         if ($this->sweepInterval >= PHP_INT_MAX || $this->bucketTtl >= PHP_INT_MAX) {
             return;
         }
-        if (self::$lastSweepAt === 0.0 || ($now - self::$lastSweepAt) >= $this->sweepInterval) {
+        if (!self::$hasSwept || ($now - self::$lastSweepAt) >= $this->sweepInterval) {
             $this->locked(function () use ($now): void {
                 $cutoff = $now - $this->bucketTtl;
                 self::$buckets = array_filter(
@@ -238,6 +249,7 @@ final class RateLimitMiddleware implements MiddlewareInterface
                     static fn(array $b): bool => $b['updated'] >= $cutoff,
                 );
                 self::$lastSweepAt = $now;
+                self::$hasSwept = true;
             });
         }
     }

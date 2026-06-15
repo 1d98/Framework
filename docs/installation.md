@@ -37,7 +37,7 @@ Expected:
 HTTP/1.1 200 OK
 Content-Type: text/html; charset=utf-8
 ...
-<!DOCTYPE html>...<h1>Framework v0.5.4</h1>
+<!DOCTYPE html>...<h1>Framework v0.5.5</h1>
 ```
 
 Other demo routes wired in `public/index.php`: `/json`, `/hello/{name}`, `/api/v1/echo` (POST JSON), `/api/v1/form` (POST form), `/boom` (deliberate 404). See [Quick start — Web](quickstart-web.md) for the full table.

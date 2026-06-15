@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-06-15
+
+### Fixed
+- **`NamespaceResolver` paths on Windows** — `realpath()` on Windows returns the canonical path with backslashes, and the post-`realpath` `isUnder()` prefix check compared against a literal `\` prefix, so every PSR-4 lookup on Windows missed and the resolver fell back to the `App\<subdir>` heuristic even when the consumer's `composer.json` had a correct PSR-4 mapping. `normalizePath()` now also converts backslashes to forward slashes after `realpath()`, so internal comparisons in the class are platform-independent. Consumer projects on Windows now get the same `Acme\Http\Controller` namespace as on Linux.
+- **`RateLimitMiddleware` sweep amortization on `FakeClock(0.0)`** — the `lastSweepAt === 0.0` "never swept" sentinel would re-fire on every request when a test clock starts at exactly `0.0`, because the first sweep records `lastSweepAt = 0.0` and the next call still sees the sentinel. Tracked "has the initial sweep ever run" in a separate `static bool $hasSwept` flag; the production `SystemClock` returns Unix-epoch time and was never affected.
+- **`MakeRuleCommand` `--description` CRLF test cross-platform** — the assertion `assertStringNotContainsString("\r", $contents)` was run against the whole generated file, but on Windows `file_put_contents` and the source-file checkout use `\r\n` line endings. The assertion is now scoped to the description area (no `first\r` and no `\rsecond`) — the file as a whole may still contain `\r\n` between lines, which is correct.
+
 ## [0.5.4] - 2026-06-15
 
 ### Added
@@ -104,4 +111,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.5.2]: https://github.com/1d98/framework/releases/tag/v0.5.2
 [0.5.3]: https://github.com/1d98/framework/releases/tag/v0.5.3
 [0.5.4]: https://github.com/1d98/framework/releases/tag/v0.5.4
-[Unreleased]: https://github.com/1d98/framework/compare/v0.5.4...HEAD
+[0.5.5]: https://github.com/1d98/framework/releases/tag/v0.5.5
+[Unreleased]: https://github.com/1d98/framework/compare/v0.5.5...HEAD

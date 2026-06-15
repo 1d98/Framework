@@ -35,7 +35,11 @@ final class ScaffolderTemplateDriftTest extends MakeScaffolderTestCase
 
     public function testRuleTemplateImplementsRuleInterfaceAndExposesName(): void
     {
-        $cmd = new MakeRuleCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeRuleCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'Framework\\Validation\\Rule',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:rule', 'DriftTest']);
 
@@ -66,7 +70,11 @@ final class ScaffolderTemplateDriftTest extends MakeScaffolderTestCase
 
     public function testDtoTemplateIsFinalReadonlyAndLintsClean(): void
     {
-        $cmd = new MakeDtoCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeDtoCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'Framework\\Validation\\Dto',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:dto', 'DriftTest']);
 

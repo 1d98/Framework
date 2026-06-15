@@ -35,14 +35,18 @@ final class %class% extends HttpException
 }
 PHP;
 
+    private readonly NamespaceResolver $namespaceResolver;
+
     public function __construct(
         ContainerInterface $container,
         private readonly string $exceptionDir,
-        private readonly string $namespace = 'App\Http\Exception',
+        private readonly ?string $namespaceOverride = null,
         private readonly int $defaultStatus = self::DEFAULT_STATUS,
         private readonly ClassNameValidator $validator = new ClassNameValidator(),
+        ?NamespaceResolver $namespaceResolver = null,
     ) {
         parent::__construct($container);
+        $this->namespaceResolver = $namespaceResolver ?? new NamespaceResolver();
     }
 
     public function name(): string
@@ -63,12 +67,12 @@ PHP;
             return 1;
         }
 
-        $base = $this->validator->normalize($raw);
-        if ($base === '') {
+        $class = $this->validator->suffixed($raw, 'Exception');
+        if ($class === '') {
             $output->danger('Invalid exception name. Use PascalCase (e.g. PaymentRequired, Teapot).');
             return 1;
         }
-        $class = str_ends_with($base, 'Exception') ? $base : $base . 'Exception';
+        $base = $this->validator->normalize($raw);
 
         $statusOption = $input->option('status');
         if ($statusOption === null || $statusOption === '') {
@@ -100,8 +104,16 @@ PHP;
             return 1;
         }
 
+        if (!is_dir($this->exceptionDir) && !@mkdir($this->exceptionDir, 0o755, true) && !is_dir($this->exceptionDir)) {
+            $output->danger("Failed to create directory: {$this->exceptionDir}");
+            return 1;
+        }
+
+        $namespace = $this->namespaceOverride
+            ?? $this->namespaceResolver->resolveForTargetDir($this->exceptionDir);
+
         $body = strtr(self::TEMPLATE, [
-            '%namespace%' => $this->namespace,
+            '%namespace%' => $namespace,
             '%class%' => $class,
             '%status%' => (string) $status,
             '%defaultMessage%' => var_export($message, true),
@@ -115,6 +127,7 @@ PHP;
 
         $output->success("Created {$path}");
         $output->info("Class: {$class}");
+        $output->info("Namespace: {$namespace}");
         $output->info("Status: {$status}");
         $output->info('Next: throw this exception from a controller — HttpKernel renders it as application/problem+json.');
         return 0;

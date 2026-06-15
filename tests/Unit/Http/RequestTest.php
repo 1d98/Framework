@@ -252,4 +252,79 @@ final class RequestTest extends TestCase
 
         self::assertSame([], $request->cookies());
     }
+
+    public function testIsHttpsAgreesWithIsSecureByDefault(): void
+    {
+        $request = new Request('GET', '/');
+
+        self::assertSame($request->isSecure(), $request->isHttps());
+    }
+
+    public function testIsHttpsDoesNotTrustForwardedProtoWithoutProxyList(): void
+    {
+        $request = new Request('GET', '/', '', ['x-forwarded-proto' => 'https']);
+
+        self::assertFalse($request->isHttps());
+        self::assertFalse($request->isSecure());
+    }
+
+    public function testIsHttpsTrustsForwardedProtoFromTrustedProxy(): void
+    {
+        $request = new Request(
+            'GET',
+            '/',
+            '',
+            ['x-forwarded-proto' => 'https'],
+            '',
+            null,
+            null,
+            null,
+            [],
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new \Framework\Http\Request\RequestHost(
+                host: 'example.com',
+                isSecure: false,
+                remoteAddr: '10.0.0.1',
+                trustedProxies: ['10.0.0.0/8'],
+            ),
+        );
+
+        self::assertTrue($request->isHttps());
+        self::assertTrue($request->isSecure());
+    }
+
+    public function testIsHttpsRejectsMultiValueForwardedProto(): void
+    {
+        $request = new Request(
+            'GET',
+            '/',
+            '',
+            ['x-forwarded-proto' => 'https, http'],
+            '',
+            null,
+            null,
+            null,
+            [],
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new \Framework\Http\Request\RequestHost(
+                host: 'example.com',
+                isSecure: false,
+                remoteAddr: '10.0.0.1',
+                trustedProxies: ['10.0.0.0/8'],
+            ),
+        );
+
+        self::assertFalse($request->isHttps());
+        self::assertFalse($request->isSecure());
+    }
 }

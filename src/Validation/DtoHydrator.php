@@ -94,8 +94,19 @@ final class DtoHydrator
     private function resolveConstructorArgs(ReflectionMethod $constructor, array $data, string $dtoClass): array
     {
         $args = [];
+        $errors = new ValidationErrorAccumulator();
         foreach ($constructor->getParameters() as $param) {
-            $args[$param->getName()] = $this->resolveConstructorArg($param, $data, $dtoClass);
+            try {
+                $args[$param->getName()] = $this->resolveConstructorArg($param, $data, $dtoClass, $errors);
+            } catch (ValidationException $e) {
+                foreach ($e->errors()->all() as $nested) {
+                    $errors->add($nested);
+                }
+            }
+        }
+        $collected = $errors->toCollection();
+        if (!$collected->isEmpty()) {
+            throw new ValidationException($collected);
         }
         return $args;
     }
@@ -105,7 +116,7 @@ final class DtoHydrator
      * @param array<array-key, mixed> $data
      * @param class-string $dtoClass
      */
-    private function resolveConstructorArg(ReflectionParameter $param, array $data, string $dtoClass): mixed
+    private function resolveConstructorArg(ReflectionParameter $param, array $data, string $dtoClass, ValidationErrorAccumulator $errors): mixed
     {
         $value = $this->lookupParamValue($param, $data);
 
@@ -115,13 +126,27 @@ final class DtoHydrator
                 if ($param->isDefaultValueConstant()) {
                     $constName = $param->getDefaultValueConstantName();
                     if (!is_string($constName)) {
-                        throw new ValidationException($this->missingPropertyError($displayName, $dtoClass));
+                        $errors->add(new ValidationError(
+                            property: $displayName,
+                            rule: 'required',
+                            message: "missing required property '{$displayName}' for {$dtoClass}",
+                            value: null,
+                            path: [],
+                        ));
+                        return null;
                     }
                     return constant($constName);
                 }
                 return $param->getDefaultValue();
             }
-            throw new ValidationException($this->missingPropertyError($displayName, $dtoClass));
+            $errors->add(new ValidationError(
+                property: $displayName,
+                rule: 'required',
+                message: "missing required property '{$displayName}' for {$dtoClass}",
+                value: null,
+                path: [],
+            ));
+            return null;
         }
 
         if (is_array($value)) {
@@ -293,22 +318,6 @@ final class DtoHydrator
         }
         $name = $type->getName();
         return $name === $class || is_subclass_of($name, $class);
-    }
-
-    /**
-     * @param class-string $dtoClass
-     */
-    private function missingPropertyError(string $propertyName, string $dtoClass): ValidationErrorCollection
-    {
-        $errors = new ValidationErrorAccumulator();
-        $errors->add(new ValidationError(
-            property: $propertyName,
-            rule: 'required',
-            message: "missing required property '{$propertyName}' for {$dtoClass}",
-            value: null,
-            path: [],
-        ));
-        return $errors->toCollection();
     }
 
     private function hydrateProperty(ReflectionProperty $property, object $instance, mixed $value): void

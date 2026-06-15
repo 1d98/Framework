@@ -17,14 +17,22 @@ final class MakeCommandCommandTest extends MakeScaffolderTestCase
 {
     public function testNameAndDescription(): void
     {
-        $cmd = new MakeCommandCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeCommandCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'Framework\\Console\\Command',
+        );
         self::assertSame('make:command', $cmd->name());
         self::assertStringContainsString('Generate', $cmd->description());
     }
 
     public function testGeneratesClassFile(): void
     {
-        $cmd = new MakeCommandCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeCommandCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'Framework\\Console\\Command',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:command', 'Hello']);
 
@@ -43,7 +51,11 @@ final class MakeCommandCommandTest extends MakeScaffolderTestCase
 
     public function testFailsWithoutArg(): void
     {
-        $cmd = new MakeCommandCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeCommandCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'Framework\\Console\\Command',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:command']);
 
@@ -54,7 +66,11 @@ final class MakeCommandCommandTest extends MakeScaffolderTestCase
 
     public function testFailsOnInvalidName(): void
     {
-        $cmd = new MakeCommandCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeCommandCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'Framework\\Console\\Command',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:command', '!!!']);
 
@@ -64,7 +80,11 @@ final class MakeCommandCommandTest extends MakeScaffolderTestCase
 
     public function testRefusesOverwrite(): void
     {
-        $cmd = new MakeCommandCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeCommandCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'Framework\\Console\\Command',
+        );
         $output = new MemoryOutput();
 
         $first = $cmd->execute(new Input(args: ['make:command', 'Hello']), $output);
@@ -79,7 +99,11 @@ final class MakeCommandCommandTest extends MakeScaffolderTestCase
 
     public function testCustomNameAndDescription(): void
     {
-        $cmd = new MakeCommandCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeCommandCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'Framework\\Console\\Command',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:command', 'SendEmail'],
@@ -89,8 +113,54 @@ final class MakeCommandCommandTest extends MakeScaffolderTestCase
         $code = $cmd->execute($input, $output);
 
         self::assertSame(0, $code);
-        $contents = (string) file_get_contents($this->tmpFile('SendEmailCommand.php'));
+        $path = $this->tmpFile('SendEmailCommand.php');
+        $contents = (string) file_get_contents($path);
         self::assertStringContainsString("return 'mail:send';", $contents);
-        self::assertStringContainsString("Send 'an' email", $contents);
+        self::assertStringContainsString("\\'an\\'", $contents);
+        self::assertTrue(PhpLinter::check($path), 'Generated command must be valid PHP');
+    }
+
+    public function testDescriptionWithPhpInjectionPayloadIsSafelyEscaped(): void
+    {
+        $cmd = new MakeCommandCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'Framework\\Console\\Command',
+        );
+        $output = new MemoryOutput();
+        $payload = "x'; system('id > /tmp/pwned-by-make'); return 'y";
+        $input = new Input(
+            args: ['make:command', 'Injected'],
+            options: ['name' => 'injected', 'description' => $payload],
+        );
+
+        $code = $cmd->execute($input, $output);
+
+        self::assertSame(0, $code);
+        $path = $this->tmpFile('InjectedCommand.php');
+        self::assertTrue(PhpLinter::check($path), 'Generated command must be valid PHP');
+
+        $contents = (string) file_get_contents($path);
+        self::assertStringNotContainsString("system('id > /tmp", $contents);
+        self::assertStringContainsString('description(): string', $contents);
+    }
+
+    public function testCreatesMissingTargetDirectory(): void
+    {
+        $nested = $this->tmpDir . '/Console/Command';
+        self::assertDirectoryDoesNotExist($nested);
+
+        $cmd = new MakeCommandCommand(
+            new Container(),
+            $nested,
+            namespaceOverride: 'Framework\\Console\\Command',
+        );
+        $output = new MemoryOutput();
+        $input = new Input(args: ['make:command', 'Hello']);
+
+        self::assertSame(0, $cmd->execute($input, $output));
+        self::assertDirectoryExists($nested);
+        self::assertFileExists($nested . '/HelloCommand.php');
+        self::assertStringContainsString('Created', $output->stdoutText());
     }
 }

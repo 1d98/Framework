@@ -18,7 +18,7 @@ final class MakeDtoCommand extends Command
 
 declare(strict_types=1);
 
-namespace Framework\Validation\Dto;
+namespace %namespace%;
 
 use Framework\Validation\Attribute\Validate;
 use Framework\Validation\Rule\EmailRule;
@@ -35,13 +35,18 @@ final readonly class %class%
 }
 PHP;
 
+    private readonly NamespaceResolver $namespaceResolver;
+
     public function __construct(
         ContainerInterface $container,
         private readonly string $dtoDir,
         private readonly string $defaultSuffix = self::DEFAULT_SUFFIX,
+        private readonly ?string $namespaceOverride = null,
         private readonly ClassNameValidator $validator = new ClassNameValidator(),
+        ?NamespaceResolver $namespaceResolver = null,
     ) {
         parent::__construct($container);
+        $this->namespaceResolver = $namespaceResolver ?? new NamespaceResolver();
     }
 
     public function name(): string
@@ -84,7 +89,13 @@ PHP;
             return 1;
         }
 
-        $body = strtr(self::TEMPLATE, ['%class%' => $class]);
+        $namespace = $this->namespaceOverride
+            ?? $this->namespaceResolver->resolveForTargetDir($this->dtoDir);
+
+        $body = strtr(self::TEMPLATE, [
+            '%namespace%' => $namespace,
+            '%class%' => $class,
+        ]);
 
         $written = @file_put_contents($path, $body);
         if ($written === false) {
@@ -94,6 +105,7 @@ PHP;
 
         $output->success("Created {$path}");
         $output->info("Class: {$class}");
+        $output->info("Namespace: {$namespace}");
         $output->info('Next: add #[Validate(...)] attributes to your properties and bind with $request->bind(' . $class . '::class).');
         return 0;
     }

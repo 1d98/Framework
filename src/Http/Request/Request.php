@@ -264,13 +264,35 @@ final readonly class Request
     }
 
     /**
-     * The actual transport-level scheme for the immediate connection.
-     * Does NOT consult `X-Forwarded-Proto` — that header is honored
-     * only via {@see self::isSecure()} and only for trusted proxies.
+     * Whether the request was received over HTTPS, consulting the
+     * trusted-proxy list and `X-Forwarded-Proto` header the same
+     * way {@see self::isSecure()} does.
+     *
+     * This method used to return the transport-level snapshot only
+     * (ignoring `X-Forwarded-Proto` even from a trusted proxy), which
+     * meant {@see self::isSecure()} and {@see self::isHttps()} could
+     * disagree on the same request — HSTS-cookie issuance and
+     * rate-limiter behavior would silently diverge depending on which
+     * method a caller picked. The two methods are now equivalent:
+     * both honor a trusted-proxy trust list, both respect the
+     * single-value `X-Forwarded-Proto` chain-spoofing guard, both
+     * return `false` when the trust list is empty.
+     *
+     * @deprecated since 0.5.4 — use {@see self::isSecure()} instead.
+     *     The name "Https" reads as transport-only; "Secure" documents
+     *     the trusted-proxy trust semantics. The two methods are
+     *     currently equivalent (both pass through to
+     *     {@see RequestHost::isSecure()}), but `isHttps()` is kept
+     *     only for backward compatibility and may diverge in the
+     *     future.
      */
     public function isHttps(): bool
     {
-        return $this->host->isSecure;
+        return $this->host->isSecure(
+            null,
+            null,
+            $this->header('X-Forwarded-Proto'),
+        );
     }
 
     /**

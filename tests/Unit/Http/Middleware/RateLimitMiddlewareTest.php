@@ -267,6 +267,170 @@ final class RateLimitMiddlewareTest extends TestCase
         self::assertSame(204, $response->status);
     }
 
+    public function testAllowMissingKeyFalseRejectsRequestsWithoutIp(): void
+    {
+        $clock = new FakeClock();
+        $middleware = new RateLimitMiddleware(
+            capacity: 5,
+            refillPerSecond: 1.0,
+            clock: $clock,
+            allowMissingKey: false,
+        );
+
+        $request = $this->requestFromIp('');
+        $thrown = null;
+        try {
+            $middleware->process($request, static fn(): Response => Response::empty(204));
+        } catch (\Framework\Http\Exception\BadRequestHttpException $e) {
+            $thrown = $e;
+        }
+        self::assertNotNull($thrown, 'Expected BadRequestHttpException for missing key');
+    }
+
+    public function testSweepRemovesIdleBuckets(): void
+    {
+        $clock = new FakeClock(0.0);
+        $middleware = new RateLimitMiddleware(
+            capacity: 1,
+            refillPerSecond: 1.0,
+            clock: $clock,
+            bucketTtl: 60,
+        );
+
+        $request = $this->requestFromIp(self::IP_A);
+        $middleware->process($request, static fn(): Response => Response::empty(204));
+
+        self::assertArrayHasKey(self::IP_A, $this->bucketsSnapshot());
+
+        $clock->advance(120.0);
+        $removed = $middleware->sweep();
+
+        self::assertSame(1, $removed);
+        self::assertArrayNotHasKey(self::IP_A, $this->bucketsSnapshot());
+    }
+
+    public function testSweepKeepsActiveBuckets(): void
+    {
+        $clock = new FakeClock(0.0);
+        $middleware = new RateLimitMiddleware(
+            capacity: 5,
+            refillPerSecond: 1.0,
+            clock: $clock,
+            bucketTtl: 60,
+        );
+
+        $request = $this->requestFromIp(self::IP_A);
+        $middleware->process($request, static fn(): Response => Response::empty(204));
+        $clock->advance(30.0);
+        $middleware->process($request, static fn(): Response => Response::empty(204));
+        $clock->advance(45.0);
+
+        $removed = $middleware->sweep();
+
+        self::assertSame(0, $removed);
+        self::assertArrayHasKey(self::IP_A, $this->bucketsSnapshot());
+    }
+
+    public function testSweepIsAmortizedAcrossRequests(): void
+    {
+        $clock = new FakeClock(0.0);
+        $middleware = new RateLimitMiddleware(
+            capacity: 5,
+            refillPerSecond: 1.0,
+            clock: $clock,
+            bucketTtl: 60,
+            sweepInterval: 100,
+        );
+
+        $request = $this->requestFromIp(self::IP_A);
+        $middleware->process($request, static fn(): Response => Response::empty(204));
+
+        $lastSweepAt = $this->lastSweepAtSnapshot();
+        self::assertGreaterThan(0.0, $lastSweepAt, 'First request triggers initial sweep');
+
+        $clock->advance(10.0);
+        $middleware->process($request, static fn(): Response => Response::empty(204));
+        $clock->advance(10.0);
+        $middleware->process($request, static fn(): Response => Response::empty(204));
+        $clock->advance(10.0);
+
+        for ($i = 0; $i < 50; $i++) {
+            $middleware->process($request, static fn(): Response => Response::empty(204));
+            $clock->advance(1.0);
+        }
+
+        $lastSweepAtAfter = $this->lastSweepAtSnapshot();
+        self::assertSame($lastSweepAt, $lastSweepAtAfter, 'Sweep must not re-run inside sweepInterval window');
+    }
+
+    private function lastSweepAtSnapshot(): float
+    {
+        $ref = new ReflectionClass(RateLimitMiddleware::class);
+        $prop = $ref->getProperty('lastSweepAt');
+        $val = $prop->getValue();
+        self::assertIsFloat($val);
+        return $val;
+    }
+
+    public function testConstructorRejectsInvalidBucketTtl(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('bucketTtl');
+        new RateLimitMiddleware(bucketTtl: 0);
+    }
+
+    public function testConstructorRejectsInvalidSweepInterval(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('sweepInterval');
+        new RateLimitMiddleware(sweepInterval: 0);
+    }
+
+    public function testLockPathIsAcquiredAndReleasedAroundRequest(): void
+    {
+        $lockPath = tempnam(sys_get_temp_dir(), 'fw-rl-lock-');
+        self::assertNotFalse($lockPath);
+
+        $clock = new FakeClock();
+        $middleware = new RateLimitMiddleware(
+            capacity: 5,
+            refillPerSecond: 1.0,
+            clock: $clock,
+            lockPath: $lockPath,
+        );
+
+        $request = $this->requestFromIp(self::IP_A);
+        $response = $middleware->process($request, static fn(): Response => Response::empty(204));
+        self::assertSame(204, $response->status);
+
+        $second = $middleware->process($request, static fn(): Response => Response::empty(204));
+        self::assertSame(204, $second->status);
+
+        self::assertFileExists($lockPath);
+        @unlink($lockPath);
+    }
+
+    public function testLockPathFileOpenFailureThrows(): void
+    {
+        $clock = new FakeClock();
+        $middleware = new RateLimitMiddleware(
+            capacity: 1,
+            refillPerSecond: 1.0,
+            clock: $clock,
+            lockPath: '/nonexistent-directory-' . bin2hex(random_bytes(8)) . '/lock',
+        );
+
+        $request = $this->requestFromIp(self::IP_A);
+        $thrown = null;
+        try {
+            $middleware->process($request, static fn(): Response => Response::empty(204));
+        } catch (\RuntimeException $e) {
+            $thrown = $e;
+        }
+        self::assertNotNull($thrown, 'Expected RuntimeException when lock file cannot be opened');
+        self::assertStringContainsString('cannot open lock file', $thrown->getMessage());
+    }
+
     private function requestFromIp(string $ip): Request
     {
         $_SERVER['REMOTE_ADDR'] = $ip;
@@ -318,5 +482,17 @@ final class RateLimitMiddlewareTest extends TestCase
         /** @var array{tokens: float, updated: float} $bucket */
         $bucket = $buckets[$ip];
         return $bucket;
+    }
+
+    /**
+     * @return array<string, array{tokens: float, updated: float}>
+     */
+    private function bucketsSnapshot(): array
+    {
+        $ref = new ReflectionClass(RateLimitMiddleware::class);
+        $prop = $ref->getProperty('buckets');
+        /** @var array<string, array{tokens: float, updated: float}> $buckets */
+        $buckets = $prop->getValue();
+        return $buckets;
     }
 }

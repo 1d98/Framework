@@ -7,8 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-06-15
+
 ### Added
-- (next-version items)
+- **`AnsiSanitizer` strips terminal-hazardous bytes from `Output::write()` / `Output::error()`** — defense in depth against terminal-injection via attacker-controlled CLI messages (filenames, exception messages, JSON strings). Strips CSI / OSC / DCS / SOS / PM / APC / 2-byte escapes, C0 controls except `\t \n \r`, and NUL. `Output::success/info/warning/danger` sanitize the user-supplied payload but keep their own ANSI wrapper untouched.
+- **`NamespaceResolver`** in `src/Console/Command/Make/` reads the nearest `composer.json` and returns the PSR-4 namespace prefix + relative subdir for a target directory. Wired into all five `make:*` commands (`controller`, `exception`, `middleware`, `dto`, `rule`) so the generated class file is autoloadable in the consumer's project layout, not the framework's own dev-mode namespace. Falls back to `App\<subdir>` when no PSR-4 mapping covers the path. Each command accepts a `namespaceOverride` ctor arg to bypass the resolver in tests and for non-PSR-4 consumers.
+- **`RateLimitMiddleware` now supports bucket TTL + GC + optional `flock`** — the static `$buckets` store previously grew without bound and was racy across PHP-FPM / Octane / Swoole workers. New ctor args: `$bucketTtl` (default 3600 s), `$sweepInterval` (default 60 s, amortized), `$lockPath` (filesystem path passed to `flock(LOCK_EX)`), `$allowMissingKey` (when `false`, requests without an IP throw `TooManyRequestsHttpException` instead of being lumped into the shared `unknown` bucket). Neither TTL nor `flock` is a substitute for a shared store (Redis / APCu) in a multi-instance deployment — both are documented as in-process mitigations.
+- **`StreamLogger` now wraps filesystem writes in `flock(LOCK_EX)`** — default-on for files opened from a path, default-off for `stdout` / `stderr` resources (where `flock` is a no-op on some platforms). New ctor arg `$withLock: ?bool` overrides the default. Concatenated log lines from parallel PHP-FPM workers no longer interleave mid-line.
+- **`APP_TRUSTED_PROXIES` documented in `.env.example`** — documentation gap closed; the var was already wired into `Request::isSecure()` / `Request::ip()` but missing from the env template.
+
+### Changed
+- **`Request::isHttps()` now matches `Request::isSecure()`** — both honor a trusted-proxy trust list and the single-value `X-Forwarded-Proto` chain-spoofing guard. Previously `isHttps()` returned only the transport snapshot, which could disagree with `isSecure()` on the same request and silently diverge HSTS-cookie / rate-limiter / HTTPS-redirect behavior depending on which method a caller picked.
+- **`Response::redirect()` now validates the `Location` header** for CRLF / NUL via `assertValidHeaderValue()` (previously a header-injection vector).
+- **`Response::assertValidHeaderValue` error message** changed from `'Header value contains CRLF'` to `'Header value contains control character'` (the check rejects `\r \n \0`; the old message was misleading for the NUL case).
+- **`Validator::validate()` no longer throws `NotFoundException` / `InvalidArgumentException`** when a `#[Validate]` DSL references an unknown rule or has invalid syntax. It now surfaces the failure as a regular `ValidationError` (rule: `unresolved`) via the new `Framework\Validation\UnresolvedRule` value object (PSR-4 file: `src/Validation/UnresolvedRule.php`). This is a behavior change — code that called `validate()` and caught those exceptions needs to catch `ValidationException` only. **Long-running workers (Swoole / Octane) that late-register rules must call `Validator::clearCaches()`** so the parser re-resolves the rule; the per-process parsed-rule cache otherwise holds the prior `UnresolvedRule` placeholder.
+- **`DtoHydrator::hydrate()` now collects all `MISSING` required-parameter errors** instead of throwing on the first one, matching the multi-error contract used everywhere else in the validation pipeline.
+- **`make:*` commands no longer hardcode `App\Http\…` / `Framework\…` namespaces** — they derive the target namespace from the consumer's `composer.json` PSR-4 map. The generated class is now autoloadable in the consumer's project layout. **Behavior change** for projects that relied on the old `App\Http\Controller` default and had a different PSR-4 mapping: pass a custom `namespaceOverride` ctor arg in your wired scaffolder, or rely on the consumer's `composer.json` PSR-4 map (the most common path). Existing generated files keep their old namespace and need no migration.
+- **`Output::table()` sanitizes each cell's contents** with `AnsiSanitizer` (so column-width calculation sees the on-screen width, not the raw bytes — preventing attacker-controlled ANSI sequences from inflating columns and breaking alignment).
+- **`OutputInterface::usesAnsi()` renamed to `useAnsi()`** — matches the verb-less form of `useAnsi()` in the production class and the `withAnsi(bool)` builder. **Breaking** for any third-party implementor of `OutputInterface`; the test-helper `MemoryOutput` and the production `Output` were both updated. If you implement `OutputInterface` outside this repo, rename the method in your class.
+
+### Fixed
+- **`MakeRuleCommand` PHP injection via `--description`** — the description was interpolated directly into a `/** … */` docblock; `*/` inside the description closed the docblock and let the user inject raw PHP into the generated file. Sanitizer strips `/*`, `*/`, CR, and NUL from the description; an all-meta-character description now produces no docblock at all.
+- **`MakeMiddlewareCommand` namespace collision in consumer projects** — previously hardcoded `Framework\Http\Middleware`, which shadowed the framework's own class once a consumer project ran `composer require` and called the scaffolder. Resolved by the `NamespaceResolver` change above.
+- **`MakeExceptionCommand` / `MakeControllerCommand` namespace hardcoding** — previously hardcoded `App\Http\Exception` / `App\Http\Controller` regardless of the consumer's PSR-4 layout, producing files that did not autoload for projects mapping `App\` to `app/`. Resolved by the `NamespaceResolver` change above.
+- **`Response::redirect()` header injection** — `Location` was written without CRLF validation, allowing `\r\nSet-Cookie: …` injection. Now validated.
+- **`UnresolvedRule` is now PSR-4 autoloadable** — moved from `src/Validation/Validator.php` into `src/Validation/UnresolvedRule.php` so production with `composer dump-autoload -o` or OPcache preloading does not break on the first unknown rule.
+
+### Deprecated
+- **`Request::isHttps()`** — the name "Https" reads as transport-only; `isSecure()` documents the trusted-proxy trust semantics. The two methods are currently equivalent (both pass through to `RequestHost::isSecure()`), but `isHttps()` is kept only for backward compatibility and may diverge in the future. New code should call `Request::isSecure()`.
+
+### Documentation
+- `docs/installation.md`, `docs/quickstart-cli.md`, `docs/config.md` bumped from `0.5.1` → `0.5.3`.
+- `docs/value-objects.md` adds a callout about the `?string` return-type change in `StatusText::for()`.
+- `.env.example` documents `APP_TRUSTED_PROXIES` (previously only `APP_TRUSTED_HOSTS` was in the template).
 
 ## [0.5.3] - 2026-06-11
 
@@ -72,4 +103,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [0.5.2]: https://github.com/1d98/framework/releases/tag/v0.5.2
 [0.5.3]: https://github.com/1d98/framework/releases/tag/v0.5.3
-[Unreleased]: https://github.com/1d98/framework/compare/v0.5.3...HEAD
+[0.5.4]: https://github.com/1d98/framework/releases/tag/v0.5.4
+[Unreleased]: https://github.com/1d98/framework/compare/v0.5.4...HEAD

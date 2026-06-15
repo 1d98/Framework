@@ -91,4 +91,128 @@ final class StreamLoggerTest extends TestCase
         self::assertIsString($contents);
         self::assertStringEndsWith("INFO plain message\n", $contents);
     }
+
+    public function testLocksWhenWithLockEnabled(): void
+    {
+        $logger = new StreamLogger($this->logFile, 'debug', true, true);
+        $logger->info('locked');
+
+        $contents = file_get_contents($this->logFile);
+        self::assertIsString($contents);
+        self::assertStringContainsString('INFO locked', $contents);
+    }
+
+    public function testWithLockDefaultIsTrueForFilesystemPaths(): void
+    {
+        $logger = new StreamLogger($this->logFile);
+        $logger->info('default-locked');
+
+        $contents = file_get_contents($this->logFile);
+        self::assertIsString($contents);
+        self::assertStringContainsString('INFO default-locked', $contents);
+    }
+
+    public function testWithLockDefaultIsFalseForStdoutStream(): void
+    {
+        $logger = new StreamLogger(\STDOUT);
+        $ref = new \ReflectionProperty(StreamLogger::class, 'withLock');
+        self::assertFalse($ref->getValue($logger));
+    }
+
+    public function testWithLockDefaultIsTrueForFilesystemPathsReflectively(): void
+    {
+        $logger = new StreamLogger($this->logFile);
+        $ref = new \ReflectionProperty(StreamLogger::class, 'withLock');
+        self::assertTrue($ref->getValue($logger));
+    }
+
+    public function testLockedWriteFallsBackToUnlockedWhenFlockRejected(): void
+    {
+        FlockFailingStream::register();
+        try {
+            $stream = fopen('flockfail://test', 'w');
+            self::assertIsResource($stream);
+            $logger = new StreamLogger($stream, 'debug', true, true);
+            $logger->info('written despite flock rejection');
+
+            $contents = FlockFailingStream::contents();
+            self::assertStringContainsString('INFO written despite flock rejection', $contents);
+        } finally {
+            FlockFailingStream::unregister();
+        }
+    }
+}
+
+/**
+ * Test-only stream wrapper whose `stream_lock` returns `false` to
+ * simulate filesystems (NFS, FUSE) that do not support `flock`.
+ * Drives the `StreamLogger::lockedWrite()` fail-soft branch —
+ * the line is still written, just without inter-process mutual
+ * exclusion.
+ */
+final class FlockFailingStream
+{
+    /** @var resource */
+    public $context;
+    private static string $buffer = '';
+    private static bool $registered = false;
+
+    public static function register(): void
+    {
+        if (self::$registered) {
+            return;
+        }
+        stream_wrapper_register('flockfail', self::class);
+        self::$registered = true;
+        self::$buffer = '';
+    }
+
+    public static function unregister(): void
+    {
+        if (!self::$registered) {
+            return;
+        }
+        stream_wrapper_unregister('flockfail');
+        self::$registered = false;
+    }
+
+    public static function contents(): string
+    {
+        return self::$buffer;
+    }
+
+    public function stream_open(string $path, string $mode, int $options, ?int &$openedPath): bool
+    {
+        return true;
+    }
+
+    public function stream_write(string $data): int
+    {
+        self::$buffer .= $data;
+        return strlen($data);
+    }
+
+    public function stream_read(int $count): string
+    {
+        return '';
+    }
+
+    public function stream_eof(): bool
+    {
+        return true;
+    }
+
+    public function stream_close(): void
+    {
+    }
+
+    public function stream_lock(int $operation): bool
+    {
+        return false;
+    }
+
+    public function stream_flush(): bool
+    {
+        return true;
+    }
 }

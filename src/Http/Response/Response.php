@@ -67,6 +67,8 @@ final readonly class Response
             );
         }
 
+        self::assertValidHeaderValue($location);
+
         return new self($status, '', array_merge(['Location' => $location], $headers));
     }
 
@@ -180,7 +182,7 @@ final readonly class Response
     private static function assertValidHeaderValue(string $value): void
     {
         if (preg_match('/[\r\n\0]/', $value) === 1) {
-            throw new InvalidArgumentException("Header value contains CRLF: {$value}");
+            throw new InvalidArgumentException("Header value contains control character: {$value}");
         }
     }
 

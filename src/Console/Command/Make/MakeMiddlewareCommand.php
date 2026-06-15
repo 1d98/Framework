@@ -16,7 +16,7 @@ final class MakeMiddlewareCommand extends Command
 
 declare(strict_types=1);
 
-namespace Framework\Http\Middleware;
+namespace %namespace%;
 
 use Framework\Http\Middleware\MiddlewareInterface;
 use Framework\Http\Request\Request;
@@ -32,12 +32,17 @@ final class %class% implements MiddlewareInterface
 }
 PHP;
 
+    private readonly NamespaceResolver $namespaceResolver;
+
     public function __construct(
         ContainerInterface $container,
         private readonly string $middlewareDir,
+        private readonly ?string $namespaceOverride = null,
         private readonly ClassNameValidator $validator = new ClassNameValidator(),
+        ?NamespaceResolver $namespaceResolver = null,
     ) {
         parent::__construct($container);
+        $this->namespaceResolver = $namespaceResolver ?? new NamespaceResolver();
     }
 
     public function name(): string
@@ -70,7 +75,18 @@ PHP;
             return 1;
         }
 
-        $body = strtr(self::TEMPLATE, ['%class%' => $class]);
+        if (!is_dir($this->middlewareDir) && !@mkdir($this->middlewareDir, 0o755, true) && !is_dir($this->middlewareDir)) {
+            $output->danger("Failed to create directory: {$this->middlewareDir}");
+            return 1;
+        }
+
+        $namespace = $this->namespaceOverride
+            ?? $this->namespaceResolver->resolveForTargetDir($this->middlewareDir);
+
+        $body = strtr(self::TEMPLATE, [
+            '%namespace%' => $namespace,
+            '%class%' => $class,
+        ]);
 
         $written = @file_put_contents($path, $body);
         if ($written === false) {
@@ -80,6 +96,7 @@ PHP;
 
         $output->success("Created {$path}");
         $output->info("Class: {$class}");
+        $output->info("Namespace: {$namespace}");
         $output->info('Next: register the middleware in your HTTP pipeline (e.g. public/index.php).');
         return 0;
     }

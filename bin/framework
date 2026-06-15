@@ -42,6 +42,34 @@ function makeTargetDir(string $frameworkSubPath): string
 }
 
 /**
+ * Resolve the explicit namespace override for a make:* command.
+ *
+ * Returns the FQCN prefix when running from the framework's own repo
+ * (so generated files land in the `Framework\…` namespaces, regardless
+ * of what the framework's own `composer.json` declares for `psr-4`).
+ * Returns `null` in consumer mode so the per-command `NamespaceResolver`
+ * picks the namespace from the consumer's own `composer.json`.
+ *
+ * This guards against a fork / rename of the framework that changes
+ * the `psr-4` prefix in `composer.json` — without the override, the
+ * resolver would derive a `Framework\…` namespace from the framework
+ * `composer.json` for dev-mode writes into the repo, which would
+ * still work only by coincidence.
+ *
+ * @param string $subNamespace e.g. 'Console\Command' or 'Http\Controller'
+ */
+function makeNamespaceOverride(string $subNamespace): ?string
+{
+    $frameworkRoot = \dirname(__DIR__);
+    $isFrameworkRepo = is_file($frameworkRoot . '/composer.json')
+        && is_dir($frameworkRoot . '/.git');
+    if ($isFrameworkRepo) {
+        return 'Framework\\' . $subNamespace;
+    }
+    return null;
+}
+
+/**
  * Resolve the initial debug flag from the `APP_DEBUG` env var.
  * `Application::isDebug()` may still be overridden at runtime by
  * `--debug` / `--no-debug` flags.
@@ -71,11 +99,35 @@ $app
     ->add(new ConfigShowCommand($container, $container->get(ConfigInterface::class)))
     ->add(new RoutesListCommand($container, $container->get(Router::class)))
     ->add(new AppSecretCommand($container))
-    ->add(new MakeCommandCommand($container, makeTargetDir('src/Console/Command')))
-    ->add(new MakeControllerCommand($container, makeTargetDir('src/Http/Controller')))
-    ->add(new MakeExceptionCommand($container, makeTargetDir('src/Http/Exception')))
-    ->add(new MakeMiddlewareCommand($container, makeTargetDir('src/Http/Middleware')))
-    ->add(new MakeRuleCommand($container, makeTargetDir('src/Validation/Rule')))
-    ->add(new MakeDtoCommand($container, makeTargetDir('src/Validation/Dto')));
+    ->add(new MakeCommandCommand(
+        $container,
+        makeTargetDir('src/Console/Command'),
+        namespaceOverride: makeNamespaceOverride('Console\Command'),
+    ))
+    ->add(new MakeControllerCommand(
+        $container,
+        makeTargetDir('src/Http/Controller'),
+        namespaceOverride: makeNamespaceOverride('Http\Controller'),
+    ))
+    ->add(new MakeExceptionCommand(
+        $container,
+        makeTargetDir('src/Http/Exception'),
+        namespaceOverride: makeNamespaceOverride('Http\Exception'),
+    ))
+    ->add(new MakeMiddlewareCommand(
+        $container,
+        makeTargetDir('src/Http/Middleware'),
+        namespaceOverride: makeNamespaceOverride('Http\Middleware'),
+    ))
+    ->add(new MakeRuleCommand(
+        $container,
+        makeTargetDir('src/Validation/Rule'),
+        namespaceOverride: makeNamespaceOverride('Validation\Rule'),
+    ))
+    ->add(new MakeDtoCommand(
+        $container,
+        makeTargetDir('src/Validation/Dto'),
+        namespaceOverride: makeNamespaceOverride('Validation\Dto'),
+    ));
 
 exit($app->run($argv));

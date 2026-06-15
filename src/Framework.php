@@ -6,9 +6,9 @@ namespace Framework;
 
 final class Framework
 {
-    public const string VERSION = '0.5.3';
+    public const string VERSION = '0.5.4';
 
-    public const array VERSION_TRIPLE = [0, 5, 3];
+    public const array VERSION_TRIPLE = [0, 5, 4];
 
     public const string VERSION_STABILITY = 'alpha';
 }

@@ -118,8 +118,8 @@ final class OutputTest extends TestCase
         $off = new Output($stdout, $stderr, useAnsi: false);
         $on = $off->withAnsi(true);
 
-        self::assertFalse($off->usesAnsi());
-        self::assertTrue($on->usesAnsi());
+        self::assertFalse($off->useAnsi());
+        self::assertTrue($on->useAnsi());
         self::assertNotSame($off, $on);
         self::assertSame($stdout, $on->stdout());
         self::assertSame($stderr, $on->stderr());
@@ -131,7 +131,7 @@ final class OutputTest extends TestCase
         $stderr = MemoryStream::open();
         putenv('NO_COLOR=1');
         $out = new Output($stdout, $stderr);
-        self::assertFalse($out->usesAnsi());
+        self::assertFalse($out->useAnsi());
         $out->success('done');
         self::assertSame("✓ done\n", MemoryStream::contents($stdout));
     }
@@ -142,7 +142,7 @@ final class OutputTest extends TestCase
         $stderr = MemoryStream::open();
         putenv('NO_COLOR=0');
         $out = new Output($stdout, $stderr);
-        self::assertFalse($out->usesAnsi());
+        self::assertFalse($out->useAnsi());
     }
 
     public function testNoColorEnvSetToEmptyStringKeepsAnsiPerSpec(): void
@@ -151,7 +151,7 @@ final class OutputTest extends TestCase
         $stderr = MemoryStream::open();
         putenv('NO_COLOR=');
         $out = new Output($stdout, $stderr, useAnsi: true);
-        self::assertTrue($out->usesAnsi());
+        self::assertTrue($out->useAnsi());
         $out->success('done');
         self::assertSame("\033[32m✓ done\033[0m\n", MemoryStream::contents($stdout));
     }
@@ -162,7 +162,7 @@ final class OutputTest extends TestCase
         $stderr = MemoryStream::open();
         putenv('NO_COLOR');
         $out = new Output($stdout, $stderr);
-        self::assertFalse($out->usesAnsi(), 'memory stream is not a TTY');
+        self::assertFalse($out->useAnsi(), 'memory stream is not a TTY');
     }
 
     public function testExplicitTrueOverridesNoColorEnv(): void
@@ -171,7 +171,7 @@ final class OutputTest extends TestCase
         $stderr = MemoryStream::open();
         putenv('NO_COLOR=1');
         $out = new Output($stdout, $stderr, useAnsi: true);
-        self::assertTrue($out->usesAnsi());
+        self::assertTrue($out->useAnsi());
     }
 
     public function testMemoryStreamIsNotTtySoAnsiDefaultsToOff(): void
@@ -179,7 +179,7 @@ final class OutputTest extends TestCase
         $stdout = MemoryStream::open();
         $stderr = MemoryStream::open();
         $out = new Output($stdout, $stderr);
-        self::assertFalse($out->usesAnsi());
+        self::assertFalse($out->useAnsi());
     }
 
     public function testTableWithHeadersAndRows(): void
@@ -245,6 +245,138 @@ final class OutputTest extends TestCase
         $out = new Output($stdout, $stderr);
         self::assertSame($stdout, $out->stdout());
         self::assertSame($stderr, $out->stderr());
+    }
+
+    public function testWriteStripsCsiColorSequence(): void
+    {
+        [$out, $stdout] = $this->make();
+        $out->write("\x1B[31mhax\x1B[0m end");
+
+        self::assertSame("hax end\n", MemoryStream::contents($stdout));
+    }
+
+    public function testWriteStripsCursorMovementSequence(): void
+    {
+        [$out, $stdout] = $this->make();
+        $out->write("before\x1B[2J\x1B[H after");
+
+        self::assertSame("before after\n", MemoryStream::contents($stdout));
+    }
+
+    public function testWriteStripsOscSequence(): void
+    {
+        [$out, $stdout] = $this->make();
+        $out->write("a\x1B]0;evil-title\x07b");
+
+        self::assertSame("ab\n", MemoryStream::contents($stdout));
+    }
+
+    public function testWriteStripsBellAndBackspace(): void
+    {
+        [$out, $stdout] = $this->make();
+        $out->write("a\x07b\x08c");
+
+        self::assertSame("abc\n", MemoryStream::contents($stdout));
+    }
+
+    public function testWriteStripsNulByte(): void
+    {
+        [$out, $stdout] = $this->make();
+        $out->write("a\x00b");
+
+        self::assertSame("ab\n", MemoryStream::contents($stdout));
+    }
+
+    public function testWritePreservesNewlinesAndTabs(): void
+    {
+        [$out, $stdout] = $this->make();
+        $out->write("line1\nline2\there");
+
+        self::assertSame("line1\nline2\there\n", MemoryStream::contents($stdout));
+    }
+
+    public function testErrorStripsAnsi(): void
+    {
+        $stdout = MemoryStream::open();
+        $stderr = MemoryStream::open();
+        $out = new Output($stdout, $stderr);
+        $out->error("\x1B[31mpwn\x1B[0m");
+
+        self::assertSame("pwn\n", MemoryStream::contents($stderr));
+    }
+
+    public function testTableStripsAnsiFromCells(): void
+    {
+        [$out, $stdout] = $this->make();
+        $out->table(['Header'], [["\x1B[31mpwn\x1B[0m"]]);
+
+        $contents = MemoryStream::contents($stdout);
+        self::assertStringNotContainsString("\x1B[", $contents);
+        self::assertStringContainsString('pwn', $contents);
+    }
+
+    public function testTableColumnWidthsAccountForSanitizedCells(): void
+    {
+        [$out, $stdout] = $this->make();
+        $out->table(['H'], [["\x1B[31mpwn\x1B[0m"]]);
+
+        $contents = MemoryStream::contents($stdout);
+        $sepLine = explode("\n", $contents)[0];
+        $cellLine = explode("\n", $contents)[2];
+
+        $sepWidth = strlen($sepLine);
+        $cellWidth = strlen(rtrim($cellLine));
+
+        self::assertSame($sepWidth, $cellWidth, 'Separator width must match the sanitized cell width — ANSI bytes must not inflate the column');
+        self::assertStringNotContainsString("\x1B[", $cellLine);
+    }
+
+    public function testSuccessStripsAnsiFromMessage(): void
+    {
+        $stdout = MemoryStream::open();
+        $stderr = MemoryStream::open();
+        $out = new Output($stdout, $stderr);
+        $out->success("\x1B[31mpwn\x1B[0m");
+
+        $contents = MemoryStream::contents($stdout);
+        self::assertStringNotContainsString("\x1B[", $contents, 'No raw escape must remain after sanitize');
+        self::assertStringContainsString('pwn', $contents);
+    }
+
+    public function testInfoStripsAnsiFromMessage(): void
+    {
+        $stdout = MemoryStream::open();
+        $stderr = MemoryStream::open();
+        $out = new Output($stdout, $stderr);
+        $out->info("\x1B[34mpwn\x1B[0m");
+
+        $contents = MemoryStream::contents($stdout);
+        self::assertStringNotContainsString("\x1B[", $contents);
+        self::assertStringContainsString('pwn', $contents);
+    }
+
+    public function testWarningStripsAnsiFromMessage(): void
+    {
+        $stdout = MemoryStream::open();
+        $stderr = MemoryStream::open();
+        $out = new Output($stdout, $stderr);
+        $out->warning("\x1B[33mpwn\x1B[0m");
+
+        $contents = MemoryStream::contents($stdout);
+        self::assertStringNotContainsString("\x1B[", $contents);
+        self::assertStringContainsString('pwn', $contents);
+    }
+
+    public function testDangerStripsAnsiFromMessage(): void
+    {
+        $stdout = MemoryStream::open();
+        $stderr = MemoryStream::open();
+        $out = new Output($stdout, $stderr);
+        $out->danger("\x1B[31mpwn\x1B[0m");
+
+        $contents = MemoryStream::contents($stdout);
+        self::assertStringNotContainsString("\x1B[", $contents);
+        self::assertStringContainsString('pwn', $contents);
     }
 
     /**

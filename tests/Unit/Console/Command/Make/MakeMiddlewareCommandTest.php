@@ -17,14 +17,22 @@ final class MakeMiddlewareCommandTest extends MakeScaffolderTestCase
 {
     public function testNameAndDescription(): void
     {
-        $cmd = new MakeMiddlewareCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeMiddlewareCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Middleware',
+        );
         self::assertSame('make:middleware', $cmd->name());
         self::assertStringContainsString('middleware', $cmd->description());
     }
 
     public function testGeneratesClassFile(): void
     {
-        $cmd = new MakeMiddlewareCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeMiddlewareCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Middleware',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:middleware', 'Auth']);
 
@@ -35,7 +43,7 @@ final class MakeMiddlewareCommandTest extends MakeScaffolderTestCase
         self::assertFileExists($path);
 
         $contents = (string) file_get_contents($path);
-        self::assertStringContainsString('namespace Framework\Http\Middleware;', $contents);
+        self::assertStringContainsString('namespace App\Http\Middleware;', $contents);
         self::assertStringContainsString('class AuthMiddleware implements MiddlewareInterface', $contents);
         self::assertStringContainsString('public function process(Request $request, callable $next): Response', $contents);
         self::assertTrue(PhpLinter::check($path));
@@ -43,7 +51,11 @@ final class MakeMiddlewareCommandTest extends MakeScaffolderTestCase
 
     public function testFailsWithoutArg(): void
     {
-        $cmd = new MakeMiddlewareCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeMiddlewareCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Middleware',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:middleware']);
 
@@ -54,7 +66,11 @@ final class MakeMiddlewareCommandTest extends MakeScaffolderTestCase
 
     public function testFailsOnInvalidName(): void
     {
-        $cmd = new MakeMiddlewareCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeMiddlewareCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Middleware',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:middleware', '!!!']);
 
@@ -64,7 +80,11 @@ final class MakeMiddlewareCommandTest extends MakeScaffolderTestCase
 
     public function testIdempotentMiddlewareSuffix(): void
     {
-        $cmd = new MakeMiddlewareCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeMiddlewareCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Middleware',
+        );
         $output = new MemoryOutput();
 
         $code = $cmd->execute(new Input(args: ['make:middleware', 'AuthMiddleware']), $output);
@@ -75,7 +95,11 @@ final class MakeMiddlewareCommandTest extends MakeScaffolderTestCase
 
     public function testRefusesOverwrite(): void
     {
-        $cmd = new MakeMiddlewareCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeMiddlewareCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Middleware',
+        );
         $output = new MemoryOutput();
 
         $first = $cmd->execute(new Input(args: ['make:middleware', 'Auth']), $output);
@@ -86,5 +110,24 @@ final class MakeMiddlewareCommandTest extends MakeScaffolderTestCase
 
         self::assertSame(1, $second);
         self::assertStringContainsString('already exists', $output2->stdoutText());
+    }
+
+    public function testCreatesMissingTargetDirectory(): void
+    {
+        $nested = $this->tmpDir . '/Http/Middleware';
+        self::assertDirectoryDoesNotExist($nested);
+
+        $cmd = new MakeMiddlewareCommand(
+            new Container(),
+            $nested,
+            namespaceOverride: 'App\\Http\\Middleware',
+        );
+        $output = new MemoryOutput();
+        $input = new Input(args: ['make:middleware', 'Auth']);
+
+        self::assertSame(0, $cmd->execute($input, $output));
+        self::assertDirectoryExists($nested);
+        self::assertFileExists($nested . '/AuthMiddleware.php');
+        self::assertStringContainsString('Created', $output->stdoutText());
     }
 }

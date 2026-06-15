@@ -100,14 +100,14 @@ APP_UPLOAD_TMP_DIR=/var/tmp/your-app
 
 ```bash
 vendor/bin/framework list                    # see all commands
-vendor/bin/framework make:controller Foo     # scaffold into ./src/Http/Controller/
-vendor/bin/framework make:command SendEmail  # scaffold into ./src/Console/Command/
-vendor/bin/framework make:middleware Auth    # scaffold into ./src/Http/Middleware/
+vendor/bin/framework make:controller Foo     # scaffold into ./src/Http/Controller/, namespace derived from your composer.json psr-4
+vendor/bin/framework make:command SendEmail  # scaffold into ./src/Console/Command/, namespace derived from your psr-4
+vendor/bin/framework make:middleware Auth    # scaffold into ./src/Http/Middleware/, namespace derived from your psr-4
 vendor/bin/framework config:show             # dump resolved config
 vendor/bin/framework routes:list             # list registered HTTP routes
 ```
 
-The `make:*` commands write to the **current working directory's** conventional `src/...` paths. Run them from your project root.
+The `make:*` commands write to the **current working directory's** conventional `src/...` paths. The class namespace is derived from the nearest `composer.json` `psr-4` mapping (or, when run from the framework's own repo, the framework's `Framework\…` namespace). If the prefix can't be derived, the command falls back to `App\<subdir>` — the file will still write successfully, but you may need to adjust the namespace manually. Run them from your project root.
 
 ## 6. What you keep
 

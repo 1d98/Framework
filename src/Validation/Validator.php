@@ -214,8 +214,12 @@ final class Validator
             }
         }
         self::$parseRuleSpecsCalls++;
-        $parsed = $this->resolver->parseRuleSpecs($rules);
-        if (is_string($rules)) {
+        try {
+            $parsed = $this->resolver->parseRuleSpecs($rules);
+        } catch (\Framework\Container\NotFoundException | \InvalidArgumentException $e) {
+            $parsed = [new UnresolvedRule($e->getMessage())];
+        }
+        if (is_string($rules) && !($parsed[0] ?? null) instanceof UnresolvedRule) {
             /** @var list<RuleInterface> $parsed */
             self::$parsedRulesCache[$rules] = $parsed;
         }

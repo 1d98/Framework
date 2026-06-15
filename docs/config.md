@@ -34,7 +34,7 @@ php bin/framework config:show
 # +-------+--------+
 # | Key   | Value  |
 # +-------+--------+
-# | app   | {"env":"dev","version":"0.5.1"} |
+# | app   | {"env":"dev","version":"0.5.4"} |
 # +-------+--------+
 ```
 

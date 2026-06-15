@@ -24,7 +24,11 @@ final class MakeControllerCommandTest extends MakeScaffolderTestCase
 
     public function testGeneratesClassFile(): void
     {
-        $cmd = new MakeControllerCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeControllerCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Controller',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:controller', 'Home']);
 
@@ -46,7 +50,11 @@ final class MakeControllerCommandTest extends MakeScaffolderTestCase
 
     public function testFailsWithoutArg(): void
     {
-        $cmd = new MakeControllerCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeControllerCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Controller',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:controller']);
 
@@ -57,7 +65,11 @@ final class MakeControllerCommandTest extends MakeScaffolderTestCase
 
     public function testFailsOnInvalidName(): void
     {
-        $cmd = new MakeControllerCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeControllerCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Controller',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:controller', '!!!']);
 
@@ -67,7 +79,11 @@ final class MakeControllerCommandTest extends MakeScaffolderTestCase
 
     public function testIdempotentControllerSuffix(): void
     {
-        $cmd = new MakeControllerCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeControllerCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Controller',
+        );
         $output = new MemoryOutput();
 
         $code = $cmd->execute(new Input(args: ['make:controller', 'HomeController']), $output);
@@ -78,7 +94,11 @@ final class MakeControllerCommandTest extends MakeScaffolderTestCase
 
     public function testRefusesOverwrite(): void
     {
-        $cmd = new MakeControllerCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeControllerCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Controller',
+        );
         $output = new MemoryOutput();
 
         $first = $cmd->execute(new Input(args: ['make:controller', 'Home']), $output);
@@ -93,7 +113,11 @@ final class MakeControllerCommandTest extends MakeScaffolderTestCase
 
     public function testDefaultRouteSlugIsKebabOfClassName(): void
     {
-        $cmd = new MakeControllerCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeControllerCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Controller',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:controller', 'UserProfile']);
 
@@ -103,7 +127,11 @@ final class MakeControllerCommandTest extends MakeScaffolderTestCase
 
     public function testCustomNameOption(): void
     {
-        $cmd = new MakeControllerCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeControllerCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Controller',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:controller', 'Home'],
@@ -120,7 +148,7 @@ final class MakeControllerCommandTest extends MakeScaffolderTestCase
         $cmd = new MakeControllerCommand(
             new Container(),
             $this->tmpDir,
-            'My\\App\\Http\\Controller',
+            namespaceOverride: 'My\\App\\Http\\Controller',
         );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:controller', 'Home']);
@@ -137,7 +165,11 @@ final class MakeControllerCommandTest extends MakeScaffolderTestCase
         $nested = $this->tmpDir . '/Http/Controller';
         self::assertDirectoryDoesNotExist($nested);
 
-        $cmd = new MakeControllerCommand(new Container(), $nested);
+        $cmd = new MakeControllerCommand(
+            new Container(),
+            $nested,
+            namespaceOverride: 'App\\Http\\Controller',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:controller', 'Health']);
 
@@ -145,5 +177,16 @@ final class MakeControllerCommandTest extends MakeScaffolderTestCase
         self::assertDirectoryExists($nested);
         self::assertFileExists($nested . '/HealthController.php');
         self::assertStringContainsString('Created', $output->stdoutText());
+    }
+
+    public function testFallsBackToAppNamespaceWhenNoComposerJson(): void
+    {
+        $cmd = new MakeControllerCommand(new Container(), $this->tmpDir);
+        $output = new MemoryOutput();
+        $input = new Input(args: ['make:controller', 'Fallback']);
+
+        self::assertSame(0, $cmd->execute($input, $output));
+        $contents = (string) file_get_contents($this->tmpFile('FallbackController.php'));
+        self::assertStringContainsString('namespace App', $contents);
     }
 }

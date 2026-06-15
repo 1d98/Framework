@@ -28,14 +28,23 @@ final class StreamLogger implements LoggerInterface
     private $stream;
 
     private readonly bool $ownsStream;
+    private readonly bool $withLock;
 
     /**
      * @param resource|string $stream Open stream resource, or a filesystem path that will be opened in append mode.
+     * @param bool $withLock When `true` (default for filesystem paths,
+     *     `false` for pre-opened stream resources), wrap each write
+     *     in `flock(LOCK_EX)` so concurrent processes (PHP-FPM
+     *     workers, Octane/Swoole) cannot interleave a single
+     *     log line with another. Stdout/stderr streams opened via
+     *     `self::stdout()` / `self::stderr()` default to `false`
+     *     because `flock` is a no-op on pipes on some platforms.
      */
     public function __construct(
         $stream,
         private readonly string $minLevel = 'debug',
         private readonly bool $withMs = true,
+        ?bool $withLock = null,
     ) {
         $ownsStream = false;
         if (is_string($stream)) {
@@ -54,6 +63,7 @@ final class StreamLogger implements LoggerInterface
         }
         $this->stream = $stream;
         $this->ownsStream = $ownsStream;
+        $this->withLock = $withLock ?? $ownsStream;
     }
 
     public function __destruct()
@@ -113,7 +123,35 @@ final class StreamLogger implements LoggerInterface
 
         $line = "[{$timestamp}] {$levelName} {$message}{$contextPart}\n";
 
-        fwrite($this->stream, $line);
+        if ($this->withLock) {
+            $this->lockedWrite($line);
+        } else {
+            fwrite($this->stream, $line);
+        }
+    }
+
+    /**
+     * Write `$line` to the underlying stream under `flock(LOCK_EX)`.
+     *
+     * **Fail-soft on `flock` rejection.** Some filesystems (notably
+     * NFS, and some FUSE mounts) report `flock` as unsupported and
+     * return `false` instead of blocking. In that case we fall
+     * through to an unlocked `fwrite` rather than lose the log line
+     * — better to risk two concurrent writes interleaving than to
+     * silently drop a security event. The trade-off is documented
+     * in the class-level PHPDoc on `$withLock`.
+     */
+    private function lockedWrite(string $line): void
+    {
+        if (!flock($this->stream, LOCK_EX)) {
+            fwrite($this->stream, $line);
+            return;
+        }
+        try {
+            fwrite($this->stream, $line);
+        } finally {
+            flock($this->stream, LOCK_UN);
+        }
     }
 
     /**

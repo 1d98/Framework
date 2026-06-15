@@ -30,13 +30,17 @@ final readonly class %class%Controller
 }
 PHP;
 
+    private readonly NamespaceResolver $namespaceResolver;
+
     public function __construct(
         ContainerInterface $container,
         private readonly string $controllerDir,
-        private readonly string $namespace = 'App\Http\Controller',
+        private readonly ?string $namespaceOverride = null,
         private readonly ClassNameValidator $validator = new ClassNameValidator(),
+        ?NamespaceResolver $namespaceResolver = null,
     ) {
         parent::__construct($container);
+        $this->namespaceResolver = $namespaceResolver ?? new NamespaceResolver();
     }
 
     public function name(): string
@@ -77,8 +81,11 @@ PHP;
             return 1;
         }
 
+        $namespace = $this->namespaceOverride
+            ?? $this->namespaceResolver->resolveForTargetDir($this->controllerDir);
+
         $body = strtr(self::TEMPLATE, [
-            '%namespace%' => $this->namespace,
+            '%namespace%' => $namespace,
             '%class%' => $class,
         ]);
 
@@ -90,6 +97,7 @@ PHP;
 
         $output->success("Created {$path}");
         $output->info("Class: {$class}");
+        $output->info("Namespace: {$namespace}");
         $output->info("Controller route slug: {$name}");
         $output->info("Description: {$description}");
         $output->info('Next: register the controller in your router (e.g. public/index.php).');

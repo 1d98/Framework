@@ -103,6 +103,25 @@ $container->set(RuleRegistry::class, static fn(): RuleRegistry => new RuleRegist
 
 Now `#[Validate(['required', 'slug'])]` works.
 
+## Unknown rules and the `UnresolvedRule` placeholder
+
+The validator memoizes its parse of every `#[Validate]` attribute, including a parse of the rule names inside the attribute. If the rule is not registered at the moment the attribute is first parsed, the validator does **not** throw — it returns a stable placeholder `Framework\Validation\UnresolvedRule` instance that, on every call to `validate()`, reports the failure as a regular `ValidationError`:
+
+```json
+{ "field": "email", "rule": "unresolved", "message": "Validation rule \"foo\" is not registered" }
+```
+
+The placeholder is a real `RuleInterface`, so it integrates with the rest of the pipeline (error aggregation, dotted paths, `UnprocessableEntityHttpException`) without a special case. The placeholder is **excluded from the per-process parsed-rule cache**, so registering the missing rule and calling `Validator::clearCaches()` re-resolves it on the next `validate()`:
+
+```php
+$registry->register('slug', new SlugRule());
+$validator->clearCaches(); // required in long-running workers
+```
+
+> **Long-running workers (Swoole / Octane / ReactPHP) that late-register rules MUST call `Validator::clearCaches()`** after `RuleRegistry::register()`. The per-process parsed-rule cache otherwise holds the prior `UnresolvedRule` placeholder for the lifetime of the worker and the new rule never fires. The cache is per-process; in classic PHP-FPM / CLI it is cleared automatically at the end of each request.
+
+The same `UnresolvedRule` placeholder is used when the DSL has invalid syntax (e.g. `#[Validate('min:')]`) — the parser surfaces a clear `ValidationError` (rule: `unresolved`) instead of throwing `InvalidArgumentException` from inside the validator.
+
 ## Defining a DTO
 
 ```bash

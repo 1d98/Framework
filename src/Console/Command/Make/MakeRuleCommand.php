@@ -16,7 +16,7 @@ final class MakeRuleCommand extends Command
 
 declare(strict_types=1);
 
-namespace Framework\Validation\Rule;
+namespace %namespace%;
 
 %description%final class %class% implements RuleInterface
 {
@@ -40,12 +40,17 @@ namespace Framework\Validation\Rule;
 }
 PHP;
 
+    private readonly NamespaceResolver $namespaceResolver;
+
     public function __construct(
         ContainerInterface $container,
         private readonly string $rulesDir,
+        private readonly ?string $namespaceOverride = null,
         private readonly ClassNameValidator $validator = new ClassNameValidator(),
+        ?NamespaceResolver $namespaceResolver = null,
     ) {
         parent::__construct($container);
+        $this->namespaceResolver = $namespaceResolver ?? new NamespaceResolver();
     }
 
     public function name(): string
@@ -82,7 +87,16 @@ PHP;
             return 1;
         }
 
+        if (!is_dir($this->rulesDir) && !@mkdir($this->rulesDir, 0o755, true) && !is_dir($this->rulesDir)) {
+            $output->danger("Failed to create directory: {$this->rulesDir}");
+            return 1;
+        }
+
+        $namespace = $this->namespaceOverride
+            ?? $this->namespaceResolver->resolveForTargetDir($this->rulesDir);
+
         $body = strtr(self::TEMPLATE, [
+            '%namespace%' => $namespace,
             '%class%' => $class,
             '%name%' => $name,
             '%description%' => $docBlock,
@@ -96,14 +110,34 @@ PHP;
 
         $output->success("Created {$path}");
         $output->info("Class: {$class}");
+        $output->info("Namespace: {$namespace}");
         $output->info('Next: register the rule in your RuleRegistry (or use a #[Validate] shorthand).');
         return 0;
     }
 
     private function docBlock(string $description): string
     {
-        $lines = explode("\n", $description);
+        $cleaned = $this->sanitizeDocBlockDescription($description);
+        if ($cleaned === '') {
+            return '';
+        }
+        $lines = explode("\n", $cleaned);
         $text = "/**\n * " . implode("\n * ", $lines) . "\n */\n";
         return $text;
+    }
+
+    /**
+     * Strip the byte sequences that open or close a PHPDoc comment
+     * (slash-star and star-slash) and strip CR / NUL so user-supplied
+     * --description cannot inject PHP into the generated file. Multiple
+     * lines and leading whitespace are preserved. An empty result means
+     * the description was nothing but meta-characters and we drop the
+     * docblock entirely.
+     */
+    private function sanitizeDocBlockDescription(string $description): string
+    {
+        $stripped = str_replace(["*/", "/*", "\r", "\0"], ['', '', '', ''], $description);
+        $collapsed = preg_replace('/[ \t]+\n/', "\n", $stripped) ?? $stripped;
+        return trim($collapsed);
     }
 }

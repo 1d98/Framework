@@ -6,7 +6,7 @@ What this is: the `bin/framework` dispatcher, every `make:*` scaffolder, and whe
 
 ```bash
 php bin/framework
-# Framework Console 0.5.1 — available commands:
+# Framework Console 0.5.4 — available commands:
 #   list, config:show, routes:list, app:secret
 #   make:command, make:controller, make:dto, make:exception,
 #   make:middleware, make:rule
@@ -21,7 +21,7 @@ php bin/framework config:show
 # +-------+--------+
 # | Key   | Value  |
 # +-------+--------+
-# | app   | {"env":"dev","version":"0.5.1"} |
+# | app   | {"env":"dev","version":"0.5.4"} |
 # +-------+--------+
 
 php bin/framework routes:list        # every (method, path) the default Router has

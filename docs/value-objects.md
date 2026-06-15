@@ -90,7 +90,11 @@ All return new instances; the mutators run the same CRLF/NUL guard. In long-runn
 
 ## StatusText
 
-`StatusText` ([`src/Http/Response/StatusText.php`](../../src/Http/Response/StatusText.php)) maps HTTP status codes to the canonical reason phrase: `StatusText::for(404) === 'Not Found'`, `for(200) === 'OK'`. Codes outside the table return `'Unknown'`. `Response::send()` calls this internally to build the status line.
+`StatusText` ([`src/Http/Response/StatusText.php`](../../src/Http/Response/StatusText.php)) maps HTTP status codes to the canonical reason phrase: `StatusText::for(404) === 'Not Found'`, `for(200) === 'OK'`.
+
+> **Breaking change since 0.5.3.** `StatusText::for()` returns `?string` — `null` for codes outside the maintained IANA registry, instead of the previous `'Unknown'` sentinel. `Response::buildStatusLine()` substitutes an empty string for `null` so the wire format never contains `'Unknown'`. Code that called `for($code)` and concatenated the result should null-coalesce (`?? ''`) or fall back to a custom phrase.
+
+`Response::send()` calls this internally to build the status line.
 
 ## Vary
 

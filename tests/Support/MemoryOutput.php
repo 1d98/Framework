@@ -6,7 +6,7 @@ namespace Framework\Tests\Support;
 
 use Framework\Console\Output\OutputInterface;
 
-final class MemoryOutput implements OutputInterface
+final class MemoryOutput extends \Framework\Console\Output\BaseOutput
 {
     /** @var resource */
     private $stdout;
@@ -34,7 +34,7 @@ final class MemoryOutput implements OutputInterface
         return $clone;
     }
 
-    public function usesAnsi(): bool
+    public function useAnsi(): bool
     {
         return $this->useAnsi;
     }
@@ -44,24 +44,10 @@ final class MemoryOutput implements OutputInterface
         fwrite($this->stderr, $message . ($newline ? "\n" : ''));
     }
 
-    public function success(string $message): void
+    protected function writeDecorated(string $open, string $close, string $icon, string $message): void
     {
-        $this->write($this->useAnsi ? "\033[32m✓ {$message}\033[0m" : "✓ {$message}");
-    }
-
-    public function info(string $message): void
-    {
-        $this->write($this->useAnsi ? "\033[34mℹ {$message}\033[0m" : "ℹ {$message}");
-    }
-
-    public function warning(string $message): void
-    {
-        $this->write($this->useAnsi ? "\033[33m! {$message}\033[0m" : "! {$message}");
-    }
-
-    public function danger(string $message): void
-    {
-        $this->write($this->useAnsi ? "\033[31m✗ {$message}\033[0m" : "✗ {$message}");
+        $line = $this->useAnsi ? $open . $icon . $message . $close : $icon . $message;
+        fwrite($this->stdout, $line . "\n");
     }
 
     /**

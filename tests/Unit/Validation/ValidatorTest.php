@@ -22,7 +22,13 @@ final class ValidatorTest extends TestCase
 
     protected function setUp(): void
     {
+        Validator::clearCaches();
         $this->validator = new Validator(new RuleRegistry());
+    }
+
+    protected function tearDown(): void
+    {
+        Validator::clearCaches();
     }
 
     public function testValidDataReturnsDto(): void
@@ -137,10 +143,66 @@ final class ValidatorTest extends TestCase
         self::assertSame(10, $dto->score);
     }
 
-    public function testUnknownRuleInStringThrows(): void
+    public function testUnknownRuleInStringSurfacesAsValidationError(): void
     {
-        $this->expectException(\Framework\Container\NotFoundException::class);
-        $this->validator->validate(UnknownRuleDto::class, ['name' => 'x']);
+        try {
+            $this->validator->validate(UnknownRuleDto::class, ['name' => 'x']);
+            self::fail('Expected ValidationException');
+        } catch (ValidationException $e) {
+            $errors = $e->errors();
+            self::assertNotEmpty($errors->forProperty('name'));
+            self::assertSame('unresolved', $errors->forProperty('name')[0]->rule);
+            self::assertStringContainsString('nonexistent_rule', $errors->forProperty('name')[0]->message);
+        }
+    }
+
+    public function testInvalidDslSyntaxSurfacesAsValidationError(): void
+    {
+        try {
+            $this->validator->validate(InvalidSyntaxRuleDto::class, ['name' => 'x']);
+            self::fail('Expected ValidationException');
+        } catch (ValidationException $e) {
+            $errors = $e->errors();
+            self::assertNotEmpty($errors->forProperty('name'));
+            self::assertSame('unresolved', $errors->forProperty('name')[0]->rule);
+        }
+    }
+
+    public function testUnresolvedRuleIsNotMemoizedAfterLateRegistration(): void
+    {
+        \Framework\Validation\Validator::clearCaches();
+
+        $firstRegistry = new \Framework\Validation\Rule\RuleRegistry();
+        $firstValidator = new Validator($firstRegistry);
+        try {
+            $firstValidator->validate(UnknownRuleDto::class, ['name' => 'x']);
+            self::fail('Expected ValidationException on first pass');
+        } catch (ValidationException $e) {
+            self::assertSame('unresolved', $e->errors()->forProperty('name')[0]->rule);
+        }
+
+        $lateRule = new class implements \Framework\Validation\Rule\RuleInterface {
+            public function validate(mixed $value, array $params): ?string
+            {
+                return null;
+            }
+
+            public function name(): string
+            {
+                return 'late_registered';
+            }
+
+            public function params(): array
+            {
+                return [];
+            }
+        };
+        $secondRegistry = new \Framework\Validation\Rule\RuleRegistry();
+        $secondRegistry->register('nonexistent_rule', $lateRule);
+        $secondValidator = new Validator($secondRegistry);
+
+        $dto = $secondValidator->validate(UnknownRuleDto::class, ['name' => 'x']);
+        self::assertInstanceOf(UnknownRuleDto::class, $dto);
     }
 
     public function testMultipleValidateAttributesAreMerged(): void
@@ -249,6 +311,15 @@ final class UnknownRuleDto
 {
     public function __construct(
         #[Validate('required|nonexistent_rule')]
+        public ?string $name = null,
+    ) {
+    }
+}
+
+final class InvalidSyntaxRuleDto
+{
+    public function __construct(
+        #[Validate('required|min:')]
         public ?string $name = null,
     ) {
     }

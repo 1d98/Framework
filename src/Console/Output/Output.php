@@ -8,7 +8,7 @@ use function fwrite;
 use function getenv;
 use function stream_isatty;
 
-final class Output implements OutputInterface
+final class Output extends BaseOutput
 {
     private readonly bool $useAnsi;
 
@@ -35,39 +35,26 @@ final class Output implements OutputInterface
         return $clone;
     }
 
-    public function usesAnsi(): bool
+    public function useAnsi(): bool
     {
         return $this->useAnsi;
     }
 
     public function write(string $message, bool $newline = true): void
     {
-        fwrite($this->stdout, $message . ($newline ? "\n" : ''));
+        fwrite($this->stdout, AnsiSanitizer::sanitize($message) . ($newline ? "\n" : ''));
     }
 
     public function error(string $message, bool $newline = true): void
     {
-        fwrite($this->stderr, $message . ($newline ? "\n" : ''));
+        fwrite($this->stderr, AnsiSanitizer::sanitize($message) . ($newline ? "\n" : ''));
     }
 
-    public function success(string $message): void
+    protected function writeDecorated(string $open, string $close, string $icon, string $message): void
     {
-        $this->write($this->ansi("\033[32m", "\033[0m", '✓ ' . $message));
-    }
-
-    public function info(string $message): void
-    {
-        $this->write($this->ansi("\033[34m", "\033[0m", 'ℹ ' . $message));
-    }
-
-    public function warning(string $message): void
-    {
-        $this->write($this->ansi("\033[33m", "\033[0m", '! ' . $message));
-    }
-
-    public function danger(string $message): void
-    {
-        $this->write($this->ansi("\033[31m", "\033[0m", '✗ ' . $message));
+        $sanitized = AnsiSanitizer::sanitize($message);
+        $line = $this->useAnsi ? $open . $icon . $sanitized . $close : $icon . $sanitized;
+        fwrite($this->stdout, $line . "\n");
     }
 
     /**
@@ -77,13 +64,23 @@ final class Output implements OutputInterface
     public function table(array $headers, array $rows): void
     {
         $columnCount = count($headers);
+        $sanitizedHeaders = array_map(
+            static fn(string $h): string => AnsiSanitizer::sanitize($h),
+            $headers,
+        );
         /** @var list<int> $widths */
-        $widths = array_map(static fn(string $h): int => strlen($h), $headers);
+        $widths = array_map(static fn(string $h): int => strlen($h), $sanitizedHeaders);
 
+        $sanitizedRows = [];
         foreach ($rows as $row) {
             $cells = $this->extractCells($row, $columnCount);
-            foreach ($cells as $i => $cell) {
-                $widths[$i] = max($widths[$i], strlen((string) $cell));
+            $sanitizedCells = array_map(
+                static fn(string $c): string => AnsiSanitizer::sanitize($c),
+                $cells,
+            );
+            $sanitizedRows[] = $sanitizedCells;
+            foreach ($sanitizedCells as $i => $cell) {
+                $widths[$i] = max($widths[$i], strlen($cell));
             }
         }
 
@@ -94,18 +91,17 @@ final class Output implements OutputInterface
         $this->write($sepLine);
 
         $headerLine = '|';
-        foreach ($headers as $i => $h) {
+        foreach ($sanitizedHeaders as $i => $h) {
             $headerLine .= ' ' . str_pad($h, $widths[$i]) . ' |';
         }
         $this->write($headerLine);
 
         $this->write($sepLine);
 
-        foreach ($rows as $row) {
-            $cells = $this->extractCells($row, $columnCount);
+        foreach ($sanitizedRows as $sanitizedCells) {
             $rowLine = '|';
-            foreach ($cells as $i => $cell) {
-                $rowLine .= ' ' . str_pad((string) $cell, $widths[$i]) . ' |';
+            foreach ($sanitizedCells as $i => $cell) {
+                $rowLine .= ' ' . str_pad($cell, $widths[$i]) . ' |';
             }
             $this->write($rowLine);
         }
@@ -128,11 +124,6 @@ final class Output implements OutputInterface
             };
         }
         return $cells;
-    }
-
-    private function ansi(string $open, string $close, string $text): string
-    {
-        return $this->useAnsi ? $open . $text . $close : $text;
     }
 
     /**

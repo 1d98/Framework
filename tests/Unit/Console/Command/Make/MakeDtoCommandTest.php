@@ -17,14 +17,22 @@ final class MakeDtoCommandTest extends MakeScaffolderTestCase
 {
     public function testNameAndDescription(): void
     {
-        $cmd = new MakeDtoCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeDtoCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Validation\\Dto',
+        );
         self::assertSame('make:dto', $cmd->name());
         self::assertStringContainsString('DTO', $cmd->description());
     }
 
     public function testGeneratesClassFileWithRequestSuffix(): void
     {
-        $cmd = new MakeDtoCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeDtoCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Validation\\Dto',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:dto', 'CreateUser']);
 
@@ -35,7 +43,7 @@ final class MakeDtoCommandTest extends MakeScaffolderTestCase
         self::assertFileExists($path);
 
         $contents = (string) file_get_contents($path);
-        self::assertStringContainsString('namespace Framework\Validation\Dto;', $contents);
+        self::assertStringContainsString('namespace App\Validation\Dto;', $contents);
         self::assertStringContainsString('class CreateUserRequest', $contents);
         self::assertStringContainsString('use Framework\Validation\Attribute\Validate;', $contents);
         self::assertStringContainsString('use Framework\Validation\Rule\EmailRule;', $contents);
@@ -47,7 +55,11 @@ final class MakeDtoCommandTest extends MakeScaffolderTestCase
 
     public function testFailsWithoutArg(): void
     {
-        $cmd = new MakeDtoCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeDtoCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Validation\\Dto',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:dto']);
 
@@ -58,7 +70,11 @@ final class MakeDtoCommandTest extends MakeScaffolderTestCase
 
     public function testFailsOnInvalidName(): void
     {
-        $cmd = new MakeDtoCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeDtoCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Validation\\Dto',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:dto', '!!!']);
 
@@ -68,7 +84,11 @@ final class MakeDtoCommandTest extends MakeScaffolderTestCase
 
     public function testIdempotentRequestSuffix(): void
     {
-        $cmd = new MakeDtoCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeDtoCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Validation\\Dto',
+        );
         $output = new MemoryOutput();
 
         $code = $cmd->execute(new Input(args: ['make:dto', 'CreateUserRequest']), $output);
@@ -79,7 +99,11 @@ final class MakeDtoCommandTest extends MakeScaffolderTestCase
 
     public function testRefusesOverwrite(): void
     {
-        $cmd = new MakeDtoCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeDtoCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Validation\\Dto',
+        );
         $output = new MemoryOutput();
 
         $first = $cmd->execute(new Input(args: ['make:dto', 'CreateUser']), $output);
@@ -94,7 +118,11 @@ final class MakeDtoCommandTest extends MakeScaffolderTestCase
 
     public function testCustomSuffix(): void
     {
-        $cmd = new MakeDtoCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeDtoCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Validation\\Dto',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:dto', 'User'], options: ['suffix' => 'Payload']);
 
@@ -109,7 +137,11 @@ final class MakeDtoCommandTest extends MakeScaffolderTestCase
         $nested = $this->tmpDir . '/Validation/Dto';
         self::assertDirectoryDoesNotExist($nested);
 
-        $cmd = new MakeDtoCommand(new Container(), $nested);
+        $cmd = new MakeDtoCommand(
+            new Container(),
+            $nested,
+            namespaceOverride: 'App\\Validation\\Dto',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:dto', 'CreateUser']);
 

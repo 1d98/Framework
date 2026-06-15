@@ -155,6 +155,32 @@ final class DtoHydratorTest extends TestCase
         $this->hydrator->hydrate(HydratorRequiredCtorDto::class, []);
     }
 
+    public function testHydrateCollectsMultipleMissingRequiredParameters(): void
+    {
+        try {
+            $this->hydrator->hydrate(HydratorMultiRequiredDto::class, []);
+            self::fail('Expected ValidationException');
+        } catch (ValidationException $e) {
+            $errors = $e->errors();
+            self::assertSame(2, $errors->count());
+            self::assertCount(1, $errors->forProperty('email'));
+            self::assertCount(1, $errors->forProperty('password'));
+        }
+    }
+
+    public function testHydrateAggregatesMissingRequiredWithNestedDtoMissing(): void
+    {
+        try {
+            $this->hydrator->hydrate(HydratorParentWithRequiredNestedDto::class, []);
+            self::fail('Expected ValidationException');
+        } catch (ValidationException $e) {
+            $errors = $e->errors();
+            self::assertGreaterThanOrEqual(2, $errors->count());
+            self::assertNotEmpty($errors->forProperty('name'));
+            self::assertSame(2, $errors->count());
+        }
+    }
+
     public function testHydrateUsesDefaultForMissingOptionalParameter(): void
     {
         $dto = $this->hydrator->hydrate(HydratorDefaultedDto::class, ['email' => 'a@b.com']);
@@ -273,6 +299,41 @@ final class HydratorRequiredCtorDto
 {
     public function __construct(public string $email)
     {
+    }
+}
+
+final class HydratorMultiRequiredDto
+{
+    public function __construct(public string $email, public string $password)
+    {
+    }
+}
+
+final class HydratorParentWithNestedDto
+{
+    public function __construct(
+        public string $name,
+        #[Validate(HydratorAddressDto::class)]
+        public ?HydratorAddressDto $address = null,
+    ) {
+    }
+}
+
+final class HydratorAddressWithRequiredDto
+{
+    public function __construct(
+        public string $email,
+    ) {
+    }
+}
+
+final class HydratorParentWithRequiredNestedDto
+{
+    public function __construct(
+        public string $name,
+        #[Validate(HydratorAddressWithRequiredDto::class)]
+        public HydratorAddressWithRequiredDto $address,
+    ) {
     }
 }
 

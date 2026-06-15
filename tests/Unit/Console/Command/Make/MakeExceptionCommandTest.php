@@ -18,14 +18,22 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 {
     public function testNameAndDescription(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         self::assertSame('make:exception', $cmd->name());
         self::assertStringContainsString('exception', $cmd->description());
     }
 
     public function testGeneratesClassFileWithStatusAndMessage(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'PaymentRequired'],
@@ -49,7 +57,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testFailsWithoutArg(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:exception']);
 
@@ -60,7 +72,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testFailsOnInvalidName(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:exception', '!!!']);
 
@@ -70,7 +86,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testIdempotentExceptionSuffix(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
 
         $code = $cmd->execute(
@@ -84,7 +104,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testRefusesOverwrite(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
 
         $first = $cmd->execute(
@@ -111,7 +135,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testRejectsStatusBelowErrorRange(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'Foo'],
@@ -125,7 +153,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testRejectsNonNumericStatus(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'Foo'],
@@ -138,7 +170,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testRejectsStatusAboveMax(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'Foo'],
@@ -151,7 +187,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testDefaultStatusIs500(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:exception', 'Server']);
 
@@ -164,7 +204,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testGeneratedFileLintsWithPhpL(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'Foo'],
@@ -177,7 +221,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testMessageWithApostropheIsEscaped(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'Foo'],
@@ -193,7 +241,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testMessageWithRealNewlineIsPreserved(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'Foo'],
@@ -210,7 +262,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testMessageWithDoubleQuotesRoundTrips(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'Foo'],
@@ -226,7 +282,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testMessageWithBackslashIsEscaped(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'Foo'],
@@ -242,7 +302,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testRejectsNameCollidingWithBuiltInHttpException(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:exception', 'Conflict']);
 
@@ -254,7 +318,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testRejectsNotFoundNameBecauseBuiltInExists(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:exception', 'NotFound']);
 
@@ -265,7 +333,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testAcceptsNotImplementedNameBecauseNoBuiltInExists(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'NotImplemented'],
@@ -278,7 +350,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testAcceptsTeapotNameBecauseNoBuiltInExists(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'Teapot'],
@@ -291,7 +367,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testAcceptsClearlyCustomName(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(args: ['make:exception', 'Foo']);
 
@@ -301,7 +381,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testCollisionCheckAlsoCatchesBaseClassItself(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $input = new Input(
             args: ['make:exception', 'HttpException'],
@@ -315,7 +399,11 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
 
     public function testGeneratedClassInstantiatesWithOriginalMessage(): void
     {
-        $cmd = new MakeExceptionCommand(new Container(), $this->tmpDir);
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $this->tmpDir,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
         $output = new MemoryOutput();
         $message = "line1\nline2 with it's tricky \\back\\slash and \"quotes\"";
         $input = new Input(
@@ -360,5 +448,24 @@ final class MakeExceptionCommandTest extends MakeScaffolderTestCase
         } finally {
             @unlink($tmp);
         }
+    }
+
+    public function testCreatesMissingTargetDirectory(): void
+    {
+        $nested = $this->tmpDir . '/Http/Exception';
+        self::assertDirectoryDoesNotExist($nested);
+
+        $cmd = new MakeExceptionCommand(
+            new Container(),
+            $nested,
+            namespaceOverride: 'App\\Http\\Exception',
+        );
+        $output = new MemoryOutput();
+        $input = new Input(args: ['make:exception', 'Teapot']);
+
+        self::assertSame(0, $cmd->execute($input, $output));
+        self::assertDirectoryExists($nested);
+        self::assertFileExists($nested . '/TeapotException.php');
+        self::assertStringContainsString('Created', $output->stdoutText());
     }
 }

@@ -55,7 +55,7 @@ final class ResponseHeaderInjectionTest extends TestCase
     public function testWithHeaderRejectsCrlfInValue(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Header value contains CRLF');
+        $this->expectExceptionMessage('Header value contains control character');
 
         Response::text('hi')->withHeader('X-Trace', "value\r\nX-Evil: pwn");
     }
@@ -63,7 +63,7 @@ final class ResponseHeaderInjectionTest extends TestCase
     public function testWithHeaderRejectsLfInValue(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Header value contains CRLF');
+        $this->expectExceptionMessage('Header value contains control character');
 
         Response::text('hi')->withHeader('X-Trace', "value\nX-Evil: pwn");
     }
@@ -71,7 +71,7 @@ final class ResponseHeaderInjectionTest extends TestCase
     public function testWithHeaderRejectsCrInValue(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Header value contains CRLF');
+        $this->expectExceptionMessage('Header value contains control character');
 
         Response::text('hi')->withHeader('X-Trace', "value\rX-Evil: pwn");
     }
@@ -79,7 +79,7 @@ final class ResponseHeaderInjectionTest extends TestCase
     public function testWithHeaderRejectsNulInValue(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Header value contains CRLF');
+        $this->expectExceptionMessage('Header value contains control character');
 
         Response::text('hi')->withHeader('X-Trace', "value\0with-null");
     }
@@ -108,7 +108,7 @@ final class ResponseHeaderInjectionTest extends TestCase
     public function testWithRequestIdRejectsCrlfInjectedId(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Header value contains CRLF');
+        $this->expectExceptionMessage('Header value contains control character');
 
         Response::text('hi')->withRequestId("abc\r\nSet-Cookie: pwn=1");
     }
@@ -124,7 +124,7 @@ final class ResponseHeaderInjectionTest extends TestCase
     public function testWithHeadersRejectsCrlfInValue(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Header value contains CRLF');
+        $this->expectExceptionMessage('Header value contains control character');
 
         Response::text('hi')->withHeaders(['X-Trace' => "value\r\nX-Evil: pwn"]);
     }
@@ -157,8 +157,40 @@ final class ResponseHeaderInjectionTest extends TestCase
         $response = new Response(200, 'hi', ['X-Trace' => "value\r\nX-Evil: pwn"]);
 
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Header value contains CRLF');
+        $this->expectExceptionMessage('Header value contains control character');
 
         $response->toHeaderLines();
+    }
+
+    public function testRedirectRejectsCrlfInLocation(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Header value contains control character');
+
+        Response::redirect("/login\r\nSet-Cookie: pwn=1");
+    }
+
+    public function testRedirectRejectsNulInLocation(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Header value contains control character');
+
+        Response::redirect("/login\0evil");
+    }
+
+    public function testRedirectAcceptsValidLocation(): void
+    {
+        $response = Response::redirect('/dashboard', 302);
+
+        self::assertSame(302, $response->status);
+        self::assertSame('/dashboard', $response->headers['Location']);
+    }
+
+    public function testRedirectRejectsInvalidStatusCode(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Redirect status must be a 3xx redirect code');
+
+        Response::redirect('/dashboard', 200);
     }
 }

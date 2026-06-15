@@ -10,7 +10,7 @@ interface OutputInterface
 
     public function withAnsi(bool $useAnsi): self;
 
-    public function usesAnsi(): bool;
+    public function useAnsi(): bool;
 
     public function error(string $message, bool $newline = true): void;
 

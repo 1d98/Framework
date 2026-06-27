@@ -40,6 +40,19 @@ If you're new to the framework, read in this order:
 | `phpstan.neon` | PHPStan level max. |
 | `.env.example` | Tracked template; copy to `.env` (gitignored). |
 
+## Design proposals
+
+Reference material for maintainers and security reviewers — not part of the linear
+reading order. Each proposal describes an architectural change with trade-offs, open
+questions, and an estimated scope; none have a release target until the maintainer (or
+community) accepts the design.
+
+- **[Security roadmap](design/security-roadmap.md)** — five architectural security risks
+  identified by the v0.6.3-era audit that did not fit into a single small fix:
+  `LogRedactor` framework primitive, `CorsMiddleware` permissive-echo opt-in,
+  `Container::autowire` deny-list, `IdempotencyKeyMiddleware` 5xx replay policy, and
+  boot warning for in-memory defaults in prod.
+
 ## See also
 
 - [`src/`](../../src/) — the source.

@@ -13,8 +13,9 @@ If you're new to the framework, read in this order:
 5. **[Validation: 3-tier pipeline](validation.md)** — `Rule` → `#[Validate]` DTO → `Validator`, every built-in rule, nested DTOs, `bind()` / `bindWith()`, 422 mapping.
 6. **[Defense-in-depth checklist](security.md)** — CSRF, signed cookies, CSP nonces, HSTS, rate limit, body cap, OWASP A9 redaction, a worked `/login` example.
 7. **[DI container and reset semantics](container.md)** — `set` / `bind` / autowire, per-instance vs. process-wide state, the "no service locator" rule.
-8. **[Request / Response / Route value objects](value-objects.md)** — the immutable VOs that flow through the pipeline, `withX()` mutators, `StatusText`, `Vary`, `Cookie`, `SignedCookieJar`.
-9. **[Configuration and environment variables](config.md)** — the env vars, `config:show`, what's configurable and what isn't (12-factor stance).
+8. **[Request / Response / Route value objects](value-objects.md)** — the immutable VOs that flow through the pipeline, `withX()` mutators, `StatusText`, `Vary`, `Cookie`, `SignedCookieJar`, `ResponseInterface`, `StreamedResponse`, `Sse`.
+9. **[Streaming responses](streaming-response.md)** — SSE / NDJSON / large-file download end-to-end, deployment gotchas (PHP-FPM, nginx, Apache), PHPUnit testing recipes.
+10. **[Configuration and environment variables](config.md)** — the env vars, `config:show`, what's configurable and what isn't (12-factor stance).
 
 ## Conventions
 

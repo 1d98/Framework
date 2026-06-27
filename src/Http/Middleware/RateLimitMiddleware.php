@@ -10,7 +10,7 @@ use Framework\Clock\SystemClock;
 use Framework\Http\Exception\BadRequestHttpException;
 use Framework\Http\Exception\TooManyRequestsHttpException;
 use Framework\Http\Request\Request;
-use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -201,7 +201,7 @@ final class RateLimitMiddleware implements MiddlewareInterface
         $this->clock = $clock ?? new SystemClock();
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         $now = $this->clock->now();
         $this->maybeSweep($now);
@@ -218,7 +218,7 @@ final class RateLimitMiddleware implements MiddlewareInterface
 
         $throttleException = null;
 
-        $response = $this->locked(function () use ($bucketKey, $now, $next, $request, $policy, &$throttleException): Response {
+        $response = $this->locked(function () use ($bucketKey, $now, $next, $request, $policy, &$throttleException): ResponseInterface {
             $bucket = self::$buckets[$bucketKey] ?? [
                 'tokens' => (float) $policy->capacity,
                 'updated' => $now,
@@ -244,7 +244,7 @@ final class RateLimitMiddleware implements MiddlewareInterface
             $bucket['updated'] = $now;
             self::$buckets[$bucketKey] = $bucket;
 
-            /** @var Response $response */
+            /** @var ResponseInterface $response */
             $response = $next($request);
             return $this->applyRateLimitHeaders(
                 response: $response,
@@ -415,13 +415,13 @@ final class RateLimitMiddleware implements MiddlewareInterface
      * the pre-computed value.
      */
     private function applyRateLimitHeaders(
-        Response $response,
+        ResponseInterface $response,
         RateLimitPolicy $policy,
         float $tokensRemaining,
         float $now,
         bool $isThrottled,
         ?int $retryAfter,
-    ): Response {
+    ): ResponseInterface {
         $response = $response->withHeader('X-RateLimit-Limit', (string) $policy->capacity);
         $response = $response->withHeader(
             'X-RateLimit-Remaining',

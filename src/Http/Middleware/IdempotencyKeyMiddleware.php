@@ -12,6 +12,7 @@ use Framework\Http\Idempotency\IdempotencyStoreInterface;
 use Framework\Http\Idempotency\InMemoryIdempotencyStore;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use InvalidArgumentException;
 
 /**
@@ -48,6 +49,21 @@ use InvalidArgumentException;
  * a substitute for Redis / Memcached in a multi-instance
  * deployment — see the docblock on
  * {@see \Framework\Http\Idempotency\IdempotencyStoreInterface}.
+ *
+ * **Streaming responses.** When the handler returns anything
+ * other than the buffered {@see \Framework\Http\Response\Response}
+ * (currently `StreamedResponse`, and any future
+ * `ResponseInterface` implementor the middleware does not know
+ * how to serialise), the middleware cannot store the response
+ * for replay — a streamed body is produced at `send()` time and
+ * is not materialisable into a string. The reservation taken in
+ * `tryReserve()` would otherwise stay held for the full TTL
+ * window and any retry with the same key would hit
+ * `tryReserve() → false` and get `409 Conflict`. To avoid
+ * pinning the key for the entire TTL, the middleware calls
+ * {@see IdempotencyStoreInterface::forget()} on the unmatched
+ * response and returns it unchanged. The next request with the
+ * same key is then free to re-execute the handler.
  */
 final class IdempotencyKeyMiddleware implements MiddlewareInterface
 {
@@ -93,7 +109,7 @@ final class IdempotencyKeyMiddleware implements MiddlewareInterface
         }
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         $method = strtoupper($request->method);
         if (!in_array($method, $this->methods, true)) {
@@ -141,6 +157,24 @@ final class IdempotencyKeyMiddleware implements MiddlewareInterface
         }
 
         $response = $next($request);
+
+        // Streaming responses cannot be cached for replay. A StreamedResponse
+        // body is produced by an emitter closure at send() time and is not
+        // materialisable into a string we could store. Returning the streamed
+        // response unchanged is the right call — but the reservation taken
+        // in tryReserve() would otherwise stay held for the full TTL window,
+        // and any retry with the same key would hit tryReserve() → false and
+        // get 409 Conflict even after the stream was long done. Release the
+        // reservation immediately so subsequent requests can re-execute.
+        //
+        // The same forget() logic applies to any future ResponseInterface
+        // implementor we do not know how to serialise: storing an unknown
+        // response shape is unsafe, so release the slot and let the next
+        // caller re-run.
+        if (!$response instanceof Response) {
+            $this->store->forget($key);
+            return $response;
+        }
 
         $this->store->put(
             $key,

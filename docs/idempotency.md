@@ -56,8 +56,31 @@ interface IdempotencyStoreInterface
     public function put(string $key, string $method, string $path, string $bodyHash, IdempotencyEntry $entry): void;
     public function tryReserve(string $key, string $method, string $path, string $bodyHash): bool;
     public function sweep(int $olderThanSeconds): int;
+    public function forget(string $key): void;
 }
 ```
+
+The 5th method, `forget()`, is the release valve for streamed responses — see [the next section](#streamed-responses).
+
+## Streamed responses
+
+A `StreamedResponse` body is produced at `send()` time by an emitter closure — there is no string to capture into an `IdempotencyEntry`. The middleware therefore cannot replay a streamed response on retry, and must not pretend otherwise.
+
+Since 0.7.0 the middleware's flow on a streamed response is:
+
+1. `tryReserve()` claims the slot — same as for a buffered response.
+2. `next($request)` invokes the handler, which returns a `StreamedResponse`.
+3. The middleware detects the non-`Response` return type, calls `IdempotencyStoreInterface::forget($key)` to release the reservation, and returns the response unchanged.
+
+The next request with the same `Idempotency-Key` is free to re-execute the handler instead of hitting `tryReserve() → false` and getting `409 Conflict`. Pre-0.7.0, the held reservation stayed for the full TTL window and every retry got a 409 long after the original stream had completed — see the 0.7.0 changelog entry for the full bug write-up.
+
+### What this means for clients
+
+- **No replay guarantee for streams.** A retry is a re-execution, not a replay. The response is fresh; the side effect (a token emitted, a record written, a row updated) is performed again.
+- **Generate a fresh `Idempotency-Key` per attempt** if you want at-most-once semantics for the underlying side effect. The framework cannot deduplicate streaming responses — it cannot store what it never materialises.
+- **Buffered responses are unaffected.** A handler that returns a regular `Response` (the default) still gets the replay-on-retry semantics from the rest of this document. The streamed-response opt-out is only triggered when the handler's return type is not `Response`.
+
+> **Common pitfall.** Building a streaming endpoint with an `Idempotency-Key` header on every retry will appear to "work" in development (one retry, no side effect) and fail under load (the broker re-executes because the response was forgotten). If at-most-once is the requirement, the side effect must be made idempotent at the application layer (a unique constraint on the database row, a payment-intent dedup key on the payment gateway) — `Idempotency-Key` cannot enforce it for streams.
 
 A Redis adapter: `SETNX` with TTL for `tryReserve` (returns false on collision), `GET` for `get` (decode JSON), `SET` with TTL for `put`. 30 lines of code.
 

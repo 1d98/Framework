@@ -12,6 +12,7 @@ use Framework\Http\Middleware\MiddlewareInterface;
 use Framework\Http\Middleware\Pipeline;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use Framework\Http\Router\Router;
 use Framework\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -27,6 +28,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
 
         $response = $kernel->handle(new Request('GET', '/missing'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(404, $response->status);
         self::assertSame('application/problem+json', $response->headers['Content-Type']);
 
@@ -50,6 +52,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
         $kernel = new HttpKernel($router);
         $response = $kernel->handle(new Request('GET', '/bad'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(400, $response->status);
         self::assertSame('application/problem+json', $response->headers['Content-Type']);
 
@@ -70,6 +73,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
         $kernel = new HttpKernel($router);
         $response = $kernel->handle(new Request('GET', '/crash'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(500, $response->status);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
@@ -94,6 +98,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
         $kernel = new HttpKernel($router, null, null, null, true);
         $response = $kernel->handle(new Request('GET', '/crash'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(500, $response->status);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
@@ -122,6 +127,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
         );
         $response = $kernel->handle(new Request('GET', '/crash'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(500, $response->status);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
@@ -141,6 +147,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
         $kernel = new HttpKernel($router, null, null, null, true);
         $response = $kernel->handle(new Request('GET', '/bad'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(400, $response->status);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
@@ -155,7 +162,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
 
         $pipeline = new Pipeline();
         $pipeline->pipe(new class () implements MiddlewareInterface {
-            public function process(Request $request, callable $next): Response
+            public function process(Request $request, callable $next): ResponseInterface
             {
                 throw new NotFoundHttpException('blocked by mw');
             }
@@ -164,6 +171,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
         $kernel = new HttpKernel($router, $pipeline);
         $response = $kernel->handle(new Request('GET', '/x'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(404, $response->status);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
@@ -195,6 +203,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
         $kernel = new HttpKernel($router, new Pipeline(), $container);
         $response = $kernel->handle(new Request('GET', '/x'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(200, $response->status);
         self::assertSame('ok', $response->body);
     }
@@ -286,6 +295,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
         $kernel = new HttpKernel($router);
         $response = $kernel->handle(new Request('POST', '/bad'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(400, $response->status);
     }
 
@@ -298,6 +308,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
         $kernel = new HttpKernel($router);
         $response = $kernel->handle(new Request('OPTIONS', '/api/users'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(405, $response->status);
         self::assertSame('application/problem+json', $response->headers['Content-Type']);
         self::assertArrayHasKey('Allow', $response->headers);
@@ -316,7 +327,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
 
         $pipeline = new \Framework\Http\Middleware\Pipeline();
         $pipeline->pipe(new class () implements MiddlewareInterface {
-            public function process(Request $request, callable $next): Response
+            public function process(Request $request, callable $next): ResponseInterface
             {
                 throw new \Framework\Http\Exception\MethodNotAllowedHttpException(
                     'blocked',
@@ -330,6 +341,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
         $kernel = new HttpKernel($router, $pipeline);
         $response = $kernel->handle(new Request('POST', '/x'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(405, $response->status);
         self::assertSame('GET, PUT', $response->headers['Allow'] ?? null);
     }
@@ -344,6 +356,7 @@ final class HttpKernelErrorHandlingTest extends TestCase
         $kernel = new HttpKernel($router);
         $response = $kernel->handle(new Request('GET', '/x'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(400, $response->status);
         self::assertArrayNotHasKey('Allow', $response->headers);
     }

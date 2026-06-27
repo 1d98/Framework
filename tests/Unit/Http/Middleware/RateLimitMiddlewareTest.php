@@ -10,6 +10,7 @@ use Framework\Http\Middleware\RateLimitMiddleware;
 use Framework\Http\Middleware\RateLimitPolicy;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -120,7 +121,7 @@ final class RateLimitMiddlewareTest extends TestCase
             $middleware->process(new Request('GET', '/'), static fn(): Response => Response::empty(204));
         });
 
-        $responseB = $this->withRemoteAddr(self::IP_B, static function () use ($middleware): Response {
+        $responseB = $this->withRemoteAddr(self::IP_B, static function () use ($middleware): ResponseInterface {
             return $middleware->process(new Request('GET', '/'), static fn(): Response => Response::empty(204));
         });
 
@@ -248,6 +249,7 @@ final class RateLimitMiddlewareTest extends TestCase
             static fn(Request $r): Response => Response::text('hello', 200),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(200, $response->status);
         self::assertSame('hello', $response->body);
     }
@@ -261,7 +263,7 @@ final class RateLimitMiddlewareTest extends TestCase
             $middleware->process(new Request('GET', '/'), static fn(): Response => Response::empty(204));
         });
 
-        $response = $this->withRemoteAddr(self::IP_B, static function () use ($middleware): Response {
+        $response = $this->withRemoteAddr(self::IP_B, static function () use ($middleware): ResponseInterface {
             return $middleware->process(new Request('GET', '/'), static fn(): Response => Response::empty(204));
         });
 

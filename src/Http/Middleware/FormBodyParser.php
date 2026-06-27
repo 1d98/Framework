@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Framework\Http\Middleware;
 
 use Framework\Http\Request\Request;
-use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use Framework\Http\SafeParseStr;
 
 final class FormBodyParser implements MiddlewareInterface
 {
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         if (!in_array($request->method, ['POST', 'PUT', 'PATCH'], true)) {
             return $next($request);

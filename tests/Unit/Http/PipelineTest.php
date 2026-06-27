@@ -8,6 +8,7 @@ use Framework\Http\Middleware\MiddlewareInterface;
 use Framework\Http\Middleware\Pipeline;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
@@ -21,6 +22,7 @@ final class PipelineTest extends TestCase
 
         $response = $pipeline->process(new Request('GET', '/'), $core);
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('core', $response->body);
     }
 
@@ -33,6 +35,7 @@ final class PipelineTest extends TestCase
 
         $response = $pipeline->process(new Request('GET', '/'), $core);
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('core', $response->body);
         self::assertSame('yes', $response->headers['X-Wrapped']);
     }
@@ -68,6 +71,7 @@ final class PipelineTest extends TestCase
 
         $response = $pipeline->process(new Request('GET', '/'), $core);
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('shortcut', $response->body);
         self::assertSame(['pre-A'], $log, 'B and core should not be called');
     }
@@ -81,7 +85,7 @@ final class HeaderMiddleware implements MiddlewareInterface
     ) {
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         return $next($request)->withHeader($this->name, $this->value);
     }
@@ -99,7 +103,7 @@ final class LoggingMiddleware implements MiddlewareInterface
     ) {
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         $this->log[] = "pre-{$this->name}";
         $response = $next($request);
@@ -121,7 +125,7 @@ final class ShortCircuitMiddleware implements MiddlewareInterface
     ) {
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         $this->log[] = "pre-{$this->name}";
         return $this->response;

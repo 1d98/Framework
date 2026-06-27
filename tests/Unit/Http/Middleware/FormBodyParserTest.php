@@ -40,6 +40,7 @@ final class FormBodyParserTest extends TestCase
             ]);
         });
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(200, $response->status);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
@@ -65,6 +66,7 @@ final class FormBodyParserTest extends TestCase
             ]);
         });
 
+        self::assertInstanceOf(Response::class, $response);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
         self::assertSame('value', $body['key']);
@@ -84,6 +86,7 @@ final class FormBodyParserTest extends TestCase
             'form' => $r->form(),
         ]));
 
+        self::assertInstanceOf(Response::class, $response);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
         self::assertSame([], $body['form']);
@@ -103,6 +106,7 @@ final class FormBodyParserTest extends TestCase
             'form' => $r->form(),
         ]));
 
+        self::assertInstanceOf(Response::class, $response);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
         self::assertNull($body['form']);
@@ -122,6 +126,7 @@ final class FormBodyParserTest extends TestCase
             'form' => $r->form(),
         ]));
 
+        self::assertInstanceOf(Response::class, $response);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
         self::assertNull($body['form']);
@@ -141,6 +146,7 @@ final class FormBodyParserTest extends TestCase
             'form' => $r->form(),
         ]));
 
+        self::assertInstanceOf(Response::class, $response);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
         self::assertSame(['preset' => 'value'], $body['form']);
@@ -165,6 +171,7 @@ final class FormBodyParserTest extends TestCase
                 ]);
             });
 
+            self::assertInstanceOf(Response::class, $response);
             $body = json_decode($response->body, true);
             self::assertIsArray($body);
             self::assertSame('v', $body['k']);

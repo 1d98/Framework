@@ -125,6 +125,55 @@ if ($avatar instanceof UploadedFile && $avatar->isValid()) {
 
 `RequestLogger` ([`src/Http/RequestLogger.php`](../../src/Http/RequestLogger.php)) is what the kernel logs through. It strips control characters (`\r \n \t` and ASCII 0x00–0x1F minus printable whitespace) and truncates exception messages to 256 bytes — a defense-in-depth measure against log-line injection (`\n[ERROR] admin logged in`) and terminal-escape smuggling. The framework redacts the kernel-emitted log lines; your own `$logger->info(..., ['body' => $request->body])` is **not** redacted — never log the raw body. Log the request id, the validation errors, and the path.
 
+## Streaming-response safety
+
+The streaming-response value objects enforce wire-format invariants at the boundary between PHP and the network. None of the following is opt-in — the framework rejects the violation at the call site, not at `send()`.
+
+### `Response` subclassing constraint (must be `readonly`)
+
+Since 0.7.0, `Response` is `readonly class Response implements ResponseInterface` ([`src/Http/Response/Response.php:23`](../../src/Http/Response/Response.php)) — `final` was removed so userland code may subclass it (e.g. a typed `JsonResponse`). The implicit constraint: **subclasses MUST also be `readonly`**. PHP enforces this — extending a `readonly` class with a non-`readonly` subclass is a compile-time error (`Class ... cannot extend readonly class Framework\Http\Response\Response`). The framework's safety contract depends on this: every `withX()` builder returns a new instance, and that invariant only holds if the class tree is fully `readonly`.
+
+A userland subclass that adds fields and mutators mutating `$this` would break the immutable contract that middleware relies on (every middleware assumes `withHeader()` returns a new instance, never mutates the original).
+
+### `StreamedResponse::send()` redaction on emitter throw
+
+`StreamedResponse::send()` ([`src/Http/Response/StreamedResponse.php:206`](../../src/Http/Response/StreamedResponse.php)) wraps the emitter call in `try/catch (Throwable)`. If the emitter throws **after** headers have been sent, the catch block writes a sanitized one-line message to `STDERR`:
+
+```
+StreamedResponse::send() emitter threw after headers were sent: <exception-class>: <sanitized-message>
+```
+
+The sanitization collapses CR and LF in the message to spaces so a poisoned `$e->getMessage()` cannot smuggle a log-line break (and a misleading subsequent "ERROR" line) into stderr. The exception is then rethrown for normal error-rendering — the wire format of the partial response stays valid (the connection may be truncated mid-frame, but the chunked-transfer encoding terminator that PHP appended on close is what the client sees).
+
+> **Defense in depth, not a substitute.** The redaction closes the log-injection path. It does NOT turn a streaming endpoint into a safe one for arbitrary user input — the emitter should still validate the data it writes (a poisoned `$data` to `Sse::event()` is rejected by the sanitizer, but a user-controlled `fwrite($stream, $raw)` from your own code is not).
+
+### `StreamedResponse::send()` 1xx / 204 / 304 body guard (RFC 9110 §6.4)
+
+`StreamedResponse::send()` ([`src/Http/Response/StreamedResponse.php:169`](../../src/Http/Response/StreamedResponse.php)) throws `LogicException` when called with `status < 200`, `status === 204`, or `status === 304`:
+
+> StreamedResponse: status 204 cannot have a streamed body (RFC 9110 §6.4 forbids a body for 1xx, 204, 304); use a Response instead
+
+RFC 9110 §6.4 forbids a body on those statuses — clients and proxies are not required to read past the response line, and a stray body can cause connection-reuse bugs (HTTP/1.1 keep-alive ambiguity around 1xx finalization) or false-positive "response body present" checks in client libraries. Use a buffered `Response::empty(204)` for those statuses; the framework will not let a streamed body slip past the spec.
+
+### `Sse` wire-format invariants
+
+`Sse` ([`src/Http/Response/Sse.php`](../../src/Http/Response/Sse.php)) is a parser-side guard, not just a writer convenience. Each helper rejects or normalizes input before it reaches the wire:
+
+| Field | Rule |
+|---|---|
+| `$data` | CR / LF in `$data` is collapsed to LF (each line gets its own `data:` prefix). NUL is rejected outright (`InvalidArgumentException`). |
+| `$event` | CR / LF / NUL rejected. A poisoned `event: tick\nSet-Cookie: ...\n` would let a server-controlled-or-attacker-influenced value smuggle a different SSE field into the frame, with downstream parser confusion as the failure mode. |
+| `$id` | Same as `$event`. The browser stores the `id` verbatim and re-sends it as `Last-Event-ID` on reconnect; a poisoned `id` would let a CRLF reach the request-log layer. |
+| `$retryMs` | Must be `>= 0`. Negative values are nonsensical per the SSE spec and rejected. |
+
+The `$stream` argument is checked with `is_resource() && get_resource_type($stream) === 'stream'` before every `fwrite` — passing a non-stream resource throws `InvalidArgumentException` at the call site, not at `fwrite`.
+
+### `Sse::ping()` heartbeat cadence is caller-paced
+
+`Sse::ping($stream)` writes a single `: ping` line. It does **not** schedule a timer. The emitter loop owns the cadence. A long-lived SSE endpoint that never calls `Sse::ping()` (or `Sse::comment()`) will be idle-timed-out by every intermediate proxy that has a 30–60 second idle window — the connection drops, the browser reconnects, the server sees an unbounded cascade of "new" connections with no observable business event.
+
+The cadence is not a framework knob; the framework cannot know how long your stream is supposed to live. Pick a heartbeat interval between 15 and 30 seconds for a typical SSE endpoint and emit `Sse::ping()` on the schedule.
+
 ## Worked example: protecting a `/login` endpoint
 
 ```php
@@ -255,4 +304,5 @@ Pre-opened stream resources (`StreamLogger::stderr()`, `StreamLogger::stdout()`,
 
 - [Request / Response / Route value objects](value-objects.md) — `Cookie` and `Vary` headers in detail.
 - [HTTP kernel and middleware pipeline](http-kernel.md) — wiring order, custom middleware.
+- [Streaming responses](streaming-response.md) — SSE / NDJSON / large-file download, deployment gotchas, PHPUnit testing.
 - [Configuration and environment variables](config.md) — `APP_SECRET`, `APP_TRUSTED_HOSTS`, `APP_TRUSTED_PROXIES`.

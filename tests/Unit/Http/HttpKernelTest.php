@@ -9,6 +9,8 @@ use Framework\Http\Middleware\MiddlewareInterface;
 use Framework\Http\Middleware\Pipeline;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
+use Framework\Http\Response\StreamedResponse;
 use Framework\Http\Router\Router;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -24,6 +26,7 @@ final class HttpKernelTest extends TestCase
         $kernel = new HttpKernel($router);
         $response = $kernel->handle(new Request('GET', '/hello/world'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('Hi world', $response->body);
     }
 
@@ -34,6 +37,7 @@ final class HttpKernelTest extends TestCase
 
         $response = $kernel->handle(new Request('GET', '/missing'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(404, $response->status);
         self::assertSame('application/problem+json', $response->headers['Content-Type']);
 
@@ -52,7 +56,7 @@ final class HttpKernelTest extends TestCase
 
         $pipeline = new Pipeline();
         $pipeline->pipe(new class () implements MiddlewareInterface {
-            public function process(Request $request, callable $next): Response
+            public function process(Request $request, callable $next): ResponseInterface
             {
                 return $next($request)->withHeader('X-Mw', 'on');
             }
@@ -61,6 +65,7 @@ final class HttpKernelTest extends TestCase
         $kernel = new HttpKernel($router, $pipeline);
         $response = $kernel->handle(new Request('GET', '/x'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('body', $response->body);
         self::assertSame('on', $response->headers['X-Mw']);
     }
@@ -72,7 +77,7 @@ final class HttpKernelTest extends TestCase
 
         $pipeline = new Pipeline();
         $pipeline->pipe(new class () implements MiddlewareInterface {
-            public function process(Request $request, callable $next): Response
+            public function process(Request $request, callable $next): ResponseInterface
             {
                 return Response::json(['blocked' => true], 403);
             }
@@ -81,6 +86,7 @@ final class HttpKernelTest extends TestCase
         $kernel = new HttpKernel($router, $pipeline);
         $response = $kernel->handle(new Request('GET', '/x'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(403, $response->status);
         self::assertSame('application/json', $response->headers['Content-Type']);
     }
@@ -130,6 +136,7 @@ final class HttpKernelTest extends TestCase
         $kernel = new HttpKernel($router);
         $response = $kernel->handle(new Request('GET', '/bad'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(500, $response->status);
         self::assertSame('application/problem+json', $response->headers['Content-Type']);
 
@@ -157,6 +164,7 @@ final class HttpKernelTest extends TestCase
         $kernel = new HttpKernel($router);
         $response = $kernel->handle(new Request('POST', '/x'));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(422, $response->status);
         self::assertSame('application/problem+json', $response->headers['Content-Type']);
 
@@ -179,5 +187,18 @@ final class HttpKernelTest extends TestCase
         self::assertSame('age', $second['property']);
         self::assertSame('min', $second['rule']);
         self::assertSame(5, $second['value']);
+    }
+
+    public function testHandleReturnsStreamedResponseForStreamingRoute(): void
+    {
+        $router = new Router();
+        $router->get('/events', static fn(): StreamedResponse => StreamedResponse::sse(static function (): void {}));
+
+        $kernel = new HttpKernel($router);
+        $response = $kernel->handle(new Request('GET', '/events'));
+
+        self::assertInstanceOf(StreamedResponse::class, $response);
+        self::assertSame(200, $response->status);
+        self::assertSame('text/event-stream', $response->headers['Content-Type'] ?? null);
     }
 }

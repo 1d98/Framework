@@ -74,6 +74,7 @@ final class FilesystemIdempotencyStore implements IdempotencyStoreInterface
         IdempotencyEntry $entry,
     ): void {
         $payload = [
+            'key' => $key,
             'method' => $method,
             'path' => $path,
             'bodyHash' => $bodyHash,
@@ -160,6 +161,45 @@ final class FilesystemIdempotencyStore implements IdempotencyStoreInterface
             }
         }
         return $removed;
+    }
+
+    public function forget(string $key): void
+    {
+        // The filesystem address is sha256("$method:$path:$key") —
+        // the logical key alone does not let us compute the file path.
+        // Scan the directory and decode each entry's stored (method,
+        // path, key) triple; unlink any whose `key` matches. The scan
+        // is O(N files) but N is bounded by the idempotency cache
+        // size, not by request volume, and the operation is gated
+        // on a streamed-response path (rare relative to buffered
+        // requests). Missing entries are a silent no-op per the
+        // interface contract.
+        if (!is_dir($this->directory)) {
+            return;
+        }
+        foreach (AtomicFilesystem::listFiles($this->directory) as $file) {
+            $basename = basename($file);
+            if (str_ends_with($basename, '.lock')) {
+                continue;
+            }
+            $raw = @file_get_contents($file);
+            if ($raw === false || $raw === '') {
+                continue;
+            }
+            try {
+                $decoded = json_decode($raw, true, 4, JSON_THROW_ON_ERROR);
+            } catch (\JsonException) {
+                continue;
+            }
+            if (!is_array($decoded)) {
+                continue;
+            }
+            $storedKey = $decoded['key'] ?? null;
+            if (!is_string($storedKey) || $storedKey !== $key) {
+                continue;
+            }
+            @unlink($file);
+        }
     }
 
     /**

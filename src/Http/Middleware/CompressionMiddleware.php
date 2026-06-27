@@ -6,6 +6,8 @@ namespace Framework\Http\Middleware;
 
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
+use Framework\Http\Response\StreamedResponse;
 use Framework\Http\Response\Vary;
 use InvalidArgumentException;
 
@@ -38,17 +40,32 @@ final class CompressionMiddleware implements MiddlewareInterface
         }
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         $acceptEncoding = $request->header('Accept-Encoding');
         if ($acceptEncoding === null || !$this->clientAcceptsGzip($acceptEncoding)) {
-            /** @var Response $response */
+            /** @var ResponseInterface $response */
             $response = $next($request);
             return $response;
         }
 
-        /** @var Response $response */
+        /** @var ResponseInterface $response */
         $response = $next($request);
+
+        // StreamedResponse bodies are produced at send() time and
+        // cannot be gzipped-then-replaced. The chunked-transfer
+        // encoding used for streaming is also incompatible with the
+        // buffer-then-gzip strategy. Pass the streamed response
+        // through unchanged.
+        if ($response instanceof StreamedResponse) {
+            return $response;
+        }
+
+        // Unknown ResponseInterface implementor (e.g. user-defined)
+        // — we cannot read its body. Pass it through unchanged.
+        if (!$response instanceof Response) {
+            return $response;
+        }
 
         if (!$this->shouldCompress($response)) {
             return $response;

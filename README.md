@@ -74,6 +74,24 @@ $router->get('/hello/{name}', static fn(Request $r, array $p): Response
 The router sorts routes by specificity (static beats `{param}`),
 and patterns are compiled on `Route` construction.
 
+## Streaming responses
+
+For bodies too large or too long-lived to buffer in memory — Server-Sent Events, NDJSON exports, large-file downloads — return a `StreamedResponse` from the handler. The body is produced at `send()` time by a `Closure(resource): void` emitter; `Transfer-Encoding: chunked` is handled automatically. Static helpers cover the common wire formats:
+
+```php
+use Framework\Http\Request\Request;
+use Framework\Http\Response\ResponseInterface;
+use Framework\Http\Response\Sse;
+use Framework\Http\Response\StreamedResponse;
+
+$router->get('/events', static fn(Request $r): ResponseInterface
+    => StreamedResponse::sse(static function ($stream): void {
+        Sse::event($stream, json_encode(['n' => 0]), event: 'tick');
+    }));
+```
+
+See [docs/streaming-response.md](docs/streaming-response.md) for the SSE / NDJSON / large-file-download recipes, deployment gotchas (PHP-FPM `output_buffering = Off`, nginx `X-Accel-Buffering: no`, Apache `mod_buffer`), and PHPUnit testing patterns.
+
 ## Project structure
 
 ```

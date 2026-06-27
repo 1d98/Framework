@@ -30,6 +30,7 @@ final class InMemoryIdempotencyStore implements IdempotencyStoreInterface
      * Per-slot state. Keyed by `<method>:<path>:<key>`.
      *
      * @var array<string, array{
+     *     key: string,
      *     method: string,
      *     path: string,
      *     bodyHash: string,
@@ -94,6 +95,7 @@ final class InMemoryIdempotencyStore implements IdempotencyStoreInterface
     ): void {
         $slotKey = $this->slotKey($key, $method, $path);
         self::$slots[$slotKey] = [
+            'key' => $key,
             'method' => $method,
             'path' => $path,
             'bodyHash' => $bodyHash,
@@ -110,6 +112,7 @@ final class InMemoryIdempotencyStore implements IdempotencyStoreInterface
 
         if ($existing === null) {
             self::$slots[$slotKey] = [
+                'key' => $key,
                 'method' => $method,
                 'path' => $path,
                 'bodyHash' => $bodyHash,
@@ -150,6 +153,21 @@ final class InMemoryIdempotencyStore implements IdempotencyStoreInterface
             }
         }
         return $removed;
+    }
+
+    public function forget(string $key): void
+    {
+        // Scan $slots for any entry whose logical key matches. The
+        // reverse index $keysToSlots is only populated by put()
+        // (stored entries), not by tryReserve() (in-flight reservations),
+        // so it is not a reliable lookup path for the streaming-
+        // response leak we are here to fix.
+        foreach (self::$slots as $slotKey => $slot) {
+            if (($slot['key'] ?? null) === $key) {
+                unset(self::$slots[$slotKey]);
+            }
+        }
+        unset(self::$keysToSlots[$key]);
     }
 
     private function slotKey(string $key, string $method, string $path): string

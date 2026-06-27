@@ -8,6 +8,7 @@ use Framework\Http\Exception\PayloadTooLargeHttpException;
 use Framework\Http\Middleware\MultipartBodyParser;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use Framework\Http\UploadedFile;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -53,7 +54,7 @@ final class MultipartBodyParserSanitizationTest extends TestCase
         $this->withSuperglobals(
             $this->buildPost(5001),
             $this->dummyFileEntry(),
-            fn(): Response => $this->middleware->process($request, static fn(Request $r): Response => Response::json([])),
+            fn(): ResponseInterface => $this->middleware->process($request, static fn(Request $r): ResponseInterface => Response::json([])),
         );
     }
 
@@ -73,7 +74,7 @@ final class MultipartBodyParserSanitizationTest extends TestCase
         $this->withSuperglobals(
             ['huge' => str_repeat('A', 100 * 1024)],
             $this->dummyFileEntry(),
-            fn(): Response => $this->middleware->process($request, static fn(Request $r): Response => Response::json([])),
+            fn(): ResponseInterface => $this->middleware->process($request, static fn(Request $r): ResponseInterface => Response::json([])),
         );
     }
 
@@ -104,7 +105,7 @@ final class MultipartBodyParserSanitizationTest extends TestCase
         $this->withSuperglobals(
             [],
             $files,
-            fn(): Response => $this->middleware->process($request, static fn(Request $r): Response => Response::json([])),
+            fn(): ResponseInterface => $this->middleware->process($request, static fn(Request $r): ResponseInterface => Response::json([])),
         );
     }
 
@@ -124,7 +125,7 @@ final class MultipartBodyParserSanitizationTest extends TestCase
         $this->withSuperglobals(
             ['nested' => ['inner' => str_repeat('B', 70 * 1024)]],
             $this->dummyFileEntry(),
-            fn(): Response => $this->middleware->process($request, static fn(Request $r): Response => Response::json([])),
+            fn(): ResponseInterface => $this->middleware->process($request, static fn(Request $r): ResponseInterface => Response::json([])),
         );
     }
 
@@ -141,7 +142,7 @@ final class MultipartBodyParserSanitizationTest extends TestCase
         $response = $this->withSuperglobals(
             $this->buildPost(1000),
             $this->dummyFileEntry(),
-            fn(): Response => $this->middleware->process($request, static function (Request $r): Response {
+            fn(): ResponseInterface => $this->middleware->process($request, static function (Request $r): ResponseInterface {
                 $form = $r->form();
                 self::assertIsArray($form);
                 self::assertCount(1000, $form);

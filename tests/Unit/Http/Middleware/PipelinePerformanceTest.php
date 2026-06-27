@@ -8,6 +8,7 @@ use Framework\Http\Middleware\MiddlewareInterface;
 use Framework\Http\Middleware\Pipeline;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
@@ -117,7 +118,7 @@ final class SpyMiddleware implements MiddlewareInterface
 {
     public int $calls = 0;
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         $this->calls++;
         return $next($request);
@@ -130,7 +131,7 @@ final class TagAppendMiddleware implements MiddlewareInterface
     {
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         return $next($request)->withHeader('X-Tags', $this->tag);
     }

@@ -10,6 +10,7 @@ use Framework\Http\Exception\NotFoundHttpException;
 use Framework\Http\Middleware\Pipeline;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use Framework\Http\Router\RouteNotFoundException;
 use Framework\Http\Router\Router;
 use Framework\Logging\LoggerInterface;
@@ -47,7 +48,7 @@ final class HttpKernel
         $this->logger = $logger;
     }
 
-    public function handle(Request $request): Response
+    public function handle(Request $request): ResponseInterface
     {
         $core = $this->core();
         try {
@@ -70,7 +71,7 @@ final class HttpKernel
 
     private function core(): callable
     {
-        return function (Request $r): Response {
+        return function (Request $r): ResponseInterface {
             try {
                 $result = $this->router->match($r);
             } catch (RouteNotFoundException $e) {
@@ -78,7 +79,7 @@ final class HttpKernel
             }
             $handler = $result['handler'];
             $params = $result['params'];
-            /** @var callable(Request, array<string, string>): Response $handler */
+            /** @var callable(Request, array<string, string>): ResponseInterface $handler */
             return $handler($r, $params);
         };
     }

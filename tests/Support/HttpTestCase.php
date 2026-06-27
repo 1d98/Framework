@@ -7,6 +7,7 @@ namespace Framework\Tests\Support;
 use Framework\Http\HttpKernel;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
@@ -18,7 +19,7 @@ abstract class HttpTestCase extends TestCase
      * @param array<string, mixed> $body
      * @param array<string, string> $headers
      */
-    protected function request(string $method, string $path, array $body = [], array $headers = []): Response
+    protected function request(string $method, string $path, array $body = [], array $headers = []): ResponseInterface
     {
         $hasBody = $method !== 'GET' && $method !== 'HEAD' && $body !== [];
         $payload = $hasBody ? json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : '';

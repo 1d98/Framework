@@ -7,6 +7,8 @@ namespace Framework\Tests\Unit\Http\Middleware;
 use Framework\Http\Middleware\CompressionMiddleware;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
+use Framework\Http\Response\StreamedResponse;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -28,6 +30,7 @@ final class CompressionMiddlewareTest extends TestCase
 
         $response = $this->middleware->process($request, static fn(): Response => Response::text($body));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(200, $response->status);
         self::assertSame('gzip', $response->headers['Content-Encoding'] ?? null);
         self::assertSame((string) strlen($response->body), $response->headers['Content-Length'] ?? null);
@@ -43,6 +46,7 @@ final class CompressionMiddlewareTest extends TestCase
 
         $response = $this->middleware->process($request, static fn(): Response => Response::json(['data' => $body]));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('gzip', $response->headers['Content-Encoding'] ?? null);
         $decoded = gzdecode($response->body);
         self::assertIsString($decoded);
@@ -59,6 +63,7 @@ final class CompressionMiddlewareTest extends TestCase
             static fn(): Response => Response::json(['data' => $body])->withHeader('Content-Type', 'application/problem+json'),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('gzip', $response->headers['Content-Encoding'] ?? null);
     }
 
@@ -69,6 +74,7 @@ final class CompressionMiddlewareTest extends TestCase
 
         $response = $this->middleware->process($request, static fn(): Response => Response::text($body));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertArrayNotHasKey('Content-Encoding', $response->headers);
         self::assertSame($body, $response->body);
     }
@@ -80,6 +86,7 @@ final class CompressionMiddlewareTest extends TestCase
 
         $response = $this->middleware->process($request, static fn(): Response => Response::text($body));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertArrayNotHasKey('Content-Encoding', $response->headers);
         self::assertSame($body, $response->body);
     }
@@ -91,6 +98,7 @@ final class CompressionMiddlewareTest extends TestCase
 
         $response = $this->middleware->process($request, static fn(): Response => Response::text($body));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertArrayNotHasKey('Content-Encoding', $response->headers);
     }
 
@@ -108,6 +116,7 @@ final class CompressionMiddlewareTest extends TestCase
             ]),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('br', $response->headers['Content-Encoding'] ?? null);
         self::assertSame($preCompressed, $response->body);
     }
@@ -121,12 +130,14 @@ final class CompressionMiddlewareTest extends TestCase
             $request,
             static fn(): Response => Response::text($body)->withStatus(301),
         );
+        self::assertInstanceOf(Response::class, $redirectResponse);
         self::assertArrayNotHasKey('Content-Encoding', $redirectResponse->headers);
 
         $errorResponse = $this->middleware->process(
             $request,
             static fn(): Response => Response::text($body)->withStatus(500),
         );
+        self::assertInstanceOf(Response::class, $errorResponse);
         self::assertArrayNotHasKey('Content-Encoding', $errorResponse->headers);
     }
 
@@ -140,6 +151,7 @@ final class CompressionMiddlewareTest extends TestCase
             static fn(): Response => new Response(200, $body, ['Content-Type' => 'image/png']),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertArrayNotHasKey('Content-Encoding', $response->headers);
     }
 
@@ -152,6 +164,7 @@ final class CompressionMiddlewareTest extends TestCase
             static fn(): Response => Response::empty(204),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertArrayNotHasKey('Content-Encoding', $response->headers);
     }
 
@@ -168,6 +181,7 @@ final class CompressionMiddlewareTest extends TestCase
             ]),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertArrayNotHasKey('Content-Encoding', $response->headers);
     }
 
@@ -179,6 +193,7 @@ final class CompressionMiddlewareTest extends TestCase
 
         $response = $middleware->process($request, static fn(): Response => Response::text($body));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('gzip', $response->headers['Content-Encoding'] ?? null);
     }
 
@@ -190,6 +205,7 @@ final class CompressionMiddlewareTest extends TestCase
 
         $response = $middleware->process($request, static fn(): Response => Response::text($body));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('gzip', $response->headers['Content-Encoding'] ?? null);
         self::assertSame($body, gzdecode($response->body));
     }
@@ -204,12 +220,14 @@ final class CompressionMiddlewareTest extends TestCase
             $request,
             static fn(): Response => Response::json(['data' => $body]),
         );
+        self::assertInstanceOf(Response::class, $jsonResponse);
         self::assertArrayNotHasKey('Content-Encoding', $jsonResponse->headers);
 
         $htmlResponse = $middleware->process(
             $request,
             static fn(): Response => Response::html('<p>' . $body . '</p>'),
         );
+        self::assertInstanceOf(Response::class, $htmlResponse);
         self::assertSame('gzip', $htmlResponse->headers['Content-Encoding'] ?? null);
     }
 
@@ -223,6 +241,7 @@ final class CompressionMiddlewareTest extends TestCase
             static fn(): Response => Response::text($body)->withHeader('Vary', 'Origin'),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('Origin, Accept-Encoding', $response->headers['Vary'] ?? null);
     }
 
@@ -236,6 +255,7 @@ final class CompressionMiddlewareTest extends TestCase
             static fn(): Response => Response::text($body)->withHeader('Vary', 'Accept-Encoding, Origin'),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('Accept-Encoding, Origin', $response->headers['Vary'] ?? null);
     }
 
@@ -249,6 +269,7 @@ final class CompressionMiddlewareTest extends TestCase
             static fn(): Response => Response::text($body)->withHeader('Vary', 'ACCEPT-ENCODING'),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('ACCEPT-ENCODING', $response->headers['Vary'] ?? null);
     }
 
@@ -272,7 +293,27 @@ final class CompressionMiddlewareTest extends TestCase
 
         $response = $middleware->process($request, static fn(): Response => Response::text($body));
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertArrayNotHasKey('Content-Encoding', $response->headers);
         self::assertSame($body, $response->body);
+    }
+
+    public function testPassesStreamedResponseThroughUnchanged(): void
+    {
+        // StreamedResponse bodies are produced at send() time and cannot be
+        // gzipped-then-replaced. The chunked-transfer encoding used for
+        // streaming is also incompatible with the buffer-then-gzip strategy.
+        // The middleware MUST pass the streamed response through unchanged.
+        $request = new Request('GET', '/events', '', ['accept-encoding' => 'gzip']);
+
+        $streamed = StreamedResponse::sse(static function (): void {});
+
+        $response = $this->middleware->process(
+            $request,
+            static fn(): ResponseInterface => $streamed,
+        );
+
+        self::assertSame($streamed, $response, 'StreamedResponse must be passed through unchanged');
+        self::assertArrayNotHasKey('Content-Encoding', $response->headers);
     }
 }

@@ -8,6 +8,7 @@ use Framework\Exception\ConfigException;
 use Framework\Http\Exception\BadRequestHttpException;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use InvalidArgumentException;
 
 final class HttpsRedirectMiddleware implements MiddlewareInterface
@@ -58,10 +59,10 @@ final class HttpsRedirectMiddleware implements MiddlewareInterface
         $this->trustedHosts = $normalized;
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         if ($request->isSecure($this->trustedProxies)) {
-            /** @var Response $response */
+            /** @var ResponseInterface $response */
             $response = $next($request);
             return $response;
         }

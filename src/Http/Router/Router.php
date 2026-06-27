@@ -7,7 +7,7 @@ namespace Framework\Http\Router;
 use Closure;
 use Framework\Http\Exception\MethodNotAllowedHttpException;
 use Framework\Http\Request\Request;
-use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 
 final class Router implements RouterInterface
 {
@@ -312,7 +312,7 @@ final class Router implements RouterInterface
     }
 
     /**
-     * @param callable(Request, array<string, string>): Response $handler
+     * @param callable(Request, array<string, string>): ResponseInterface $handler
      */
     private function register(string $method, string $path, callable $handler): Route
     {

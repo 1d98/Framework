@@ -20,7 +20,7 @@ final class HttpKernel
         ?StructuredErrorRenderer $structuredRenderer = null,
     ) {}
 
-    public function handle(Request $request): Response { ... }
+    public function handle(Request $request): ResponseInterface { ... }
 }
 ```
 
@@ -127,7 +127,7 @@ namespace Framework\Http\Middleware;
 final class Pipeline
 {
     public function pipe(MiddlewareInterface|string $middleware): void;
-    public function process(Request $request, callable $core): Response;
+    public function process(Request $request, callable $core): ResponseInterface;
 }
 ```
 
@@ -137,7 +137,36 @@ Order: the **first** piped middleware is the **outermost** shell. `pipe(A); pipe
 
 ## Middleware interface
 
-`MiddlewareInterface::process(Request, callable): Response` ([`src/Http/Middleware/MiddlewareInterface.php:10`](../../src/Http/Middleware/MiddlewareInterface.php)). `$next($request)` invokes the next layer. Return the response from `next()` (possibly mutated) or short-circuit with a new `Response`. **Always return a `Response`** — the kernel never inspects nulls.
+`MiddlewareInterface::process(Request, callable): ResponseInterface` ([`src/Http/Middleware/MiddlewareInterface.php:15`](../../src/Http/Middleware/MiddlewareInterface.php)). `$next($request)` invokes the next layer. Return the response from `next()` (possibly mutated) or short-circuit with a new `Response` or `StreamedResponse`. **Always return a `ResponseInterface`** — the kernel never inspects nulls. Since 0.7.0 the return type is widened to `ResponseInterface`; middleware may now hand back either a buffered `Response` or a streaming `StreamedResponse`.
+
+## Response types
+
+`HttpKernel::handle()` ([`src/Http/HttpKernel.php:51`](../../src/Http/HttpKernel.php)) returns `ResponseInterface`. Two implementations ship in the framework:
+
+| Type | When | Wire format |
+|---|---|---|
+| [`Response`](value-objects.md#response) | Body fits in memory. | Headers + buffered body. ETag-able, gzip-able. |
+| [`StreamedResponse`](value-objects.md#streamedresponse) | Body is too large or too long-lived to buffer (SSE, NDJSON, large file). | Headers + `php://output` writes via the `http` chunked stream filter (when `contentLength === null`). |
+
+The kernel and middleware are polymorphic over the return type — middleware that buffers the body short-circuits on a streamed response and vice versa.
+
+### Middleware behavior with `StreamedResponse`
+
+Three built-in middlewares change shape on a streamed response:
+
+| Middleware | Buffered `Response` | `StreamedResponse` |
+|---|---|---|
+| `EtagMiddleware` | Computes an `ETag` from the body, returns `304` on `If-None-Match`, enforces `If-Match` (412). | Pass-through. Streaming bodies cannot be hashed-for-etag. Set your own `ETag` header on the streamed response if you need cacheability. |
+| `CompressionMiddleware` | gzips bodies over `$threshold` (default 1 KiB), sets `Content-Encoding: gzip` + `Vary: Accept-Encoding`. | Pass-through. The buffer-then-gzip strategy is incompatible with chunked transfer encoding. |
+| `IdempotencyKeyMiddleware` | `put()`s the response into the store for replay on retry. | Calls `IdempotencyStoreInterface::forget()` to release the reservation and returns the streamed response unchanged. No replay guarantee — see [the Streamed responses section of the idempotency chapter](idempotency.md#streamed-responses). |
+
+Middleware that reads `$response->body` will fail loudly on a streamed response (the field is on `Response`, but the wire body is on the emitter). For a streamed response, call `$response->send()` and read from `php://output` indirectly via the emitter.
+
+### Body parsers don't interact
+
+The body-parser middlewares (`JsonBodyParser`, `FormBodyParser`, `MultipartBodyParser`) mutate the **request**, not the response. They are indifferent to whether the handler returns a buffered or streamed response — the response choice is purely downstream. A route can parse a JSON body and stream SSE back, e.g. an AI token-by-token endpoint.
+
+For the streaming-response end-to-end story (route handlers, deployment gotchas, PHPUnit testing), see [Streaming responses](streaming-response.md).
 
 ## Pipeline order in `public/index.php`
 
@@ -181,6 +210,7 @@ namespace App\Http\Middleware;
 use Framework\Http\Middleware\MiddlewareInterface;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 
 final class AuthMiddleware implements MiddlewareInterface
 {
@@ -188,7 +218,7 @@ final class AuthMiddleware implements MiddlewareInterface
         private readonly string $expectedToken,
     ) {}
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         $auth = $request->header('Authorization');
         if ($auth !== 'Bearer ' . $this->expectedToken) {

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Framework\Http\Middleware;
 
 use Framework\Http\Request\Request;
-use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 
 final class SecurityHeadersMiddleware implements MiddlewareInterface
 {
@@ -41,7 +41,7 @@ final class SecurityHeadersMiddleware implements MiddlewareInterface
     ) {
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         $nonce = $this->cspNonce($request);
         $request = $request->withAttribute(self::ATTR_CSP_NONCE, $nonce);
@@ -74,7 +74,7 @@ final class SecurityHeadersMiddleware implements MiddlewareInterface
             $effective['Strict-Transport-Security'] = $hsts;
         }
 
-        /** @var Response $response */
+        /** @var ResponseInterface $response */
         $response = $next($request);
 
         foreach ($effective as $name => $value) {
@@ -125,7 +125,7 @@ final class SecurityHeadersMiddleware implements MiddlewareInterface
         return implode('; ', $parts);
     }
 
-    private function responseHasHeader(Response $response, string $name): bool
+    private function responseHasHeader(ResponseInterface $response, string $name): bool
     {
         $needle = strtolower($name);
         foreach ($response->headers as $key => $_value) {

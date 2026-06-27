@@ -6,7 +6,7 @@ namespace Framework\Http\Router;
 
 use Closure;
 use Framework\Http\Request\Request;
-use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use InvalidArgumentException;
 
 final class Route
@@ -221,7 +221,7 @@ final class Route
     }
 
     /**
-     * @return Closure(Request, array<string, string>): Response
+     * @return Closure(Request, array<string, string>): ResponseInterface
      */
     public function handler(): Closure
     {

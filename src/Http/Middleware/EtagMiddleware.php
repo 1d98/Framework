@@ -9,6 +9,8 @@ use Framework\Http\EtagList;
 use Framework\Http\Exception\PreconditionFailedHttpException;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
+use Framework\Http\Response\StreamedResponse;
 
 /**
  * RFC 7232 entity-tag (ETag) middleware.
@@ -50,11 +52,26 @@ final class EtagMiddleware implements MiddlewareInterface
     ) {
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         $response = $next($request);
 
         if ($this->policy->skip !== null && ($this->policy->skip)($request)) {
+            return $response;
+        }
+
+        // StreamedResponse bodies are produced at send() time and
+        // cannot be hashed for an etag. Pass through unchanged —
+        // the caller is responsible for setting their own ETag
+        // header on the streaming response if caching semantics
+        // are desired.
+        if ($response instanceof StreamedResponse) {
+            return $response;
+        }
+
+        // Unknown ResponseInterface implementor (no $body, no etag
+        // derivation possible). Pass through.
+        if (!$response instanceof Response) {
             return $response;
         }
 

@@ -35,6 +35,7 @@ final class HttpKernelValidationProblemTest extends TestCase
         $kernel = new HttpKernel($router);
         $response = $kernel->handle($request);
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(422, $response->status);
         self::assertSame('application/problem+json', $response->headers['Content-Type']);
 
@@ -68,6 +69,7 @@ final class HttpKernelValidationProblemTest extends TestCase
         $kernel = new HttpKernel($router);
         $response = $kernel->handle($request);
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(422, $response->status);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
@@ -100,6 +102,7 @@ final class HttpKernelValidationProblemTest extends TestCase
         $kernel = new HttpKernel($router);
         $response = $kernel->handle($request);
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(422, $response->status);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);

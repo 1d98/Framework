@@ -12,7 +12,7 @@ use Framework\Http\Multipart\ParsedMultipart;
 use Framework\Http\Multipart\SuperglobalFormReader;
 use Framework\Http\Multipart\TempFilePool;
 use Framework\Http\Request\Request;
-use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use Framework\Http\UploadedFile;
 
 /**
@@ -74,7 +74,7 @@ final class MultipartBodyParser implements MiddlewareInterface
         $this->maxPartBytes = $maxPartBytes > 0 ? $maxPartBytes : MultipartParser::MAX_PART_BYTES;
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         if (!in_array($request->method, ['POST', 'PUT', 'PATCH'], true)) {
             return $next($request);

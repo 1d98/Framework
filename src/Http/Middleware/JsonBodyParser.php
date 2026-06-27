@@ -6,11 +6,11 @@ namespace Framework\Http\Middleware;
 
 use Framework\Http\Exception\BadRequestHttpException;
 use Framework\Http\Request\Request;
-use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 
 final class JsonBodyParser implements MiddlewareInterface
 {
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         $contentType = $request->header('Content-Type') ?? '';
 

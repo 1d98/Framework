@@ -8,7 +8,19 @@ use Framework\Http\Cookie\Cookie;
 use Framework\Http\Exception\InternalServerErrorHttpException;
 use InvalidArgumentException;
 
-final readonly class Response
+/**
+ * Buffered HTTP response value object.
+ *
+ * Implements {@see ResponseInterface}. Subclasses MUST also be `readonly`
+ * (PHP enforces this; declared here so the constraint is visible in code
+ * review). All builder methods (`withHeader`, `withHeaders`, `withStatus`,
+ * `withCookie`, `withBody`, `withRequestId`) return a NEW instance — they
+ * never mutate `$this`.
+ *
+ * Header names, header values, and reason phrases are CRLF-checked at
+ * construction; a poisoned value throws at the call site, not at send().
+ */
+readonly class Response implements ResponseInterface
 {
     /**
      * @param array<string, string> $headers

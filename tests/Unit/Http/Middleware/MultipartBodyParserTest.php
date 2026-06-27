@@ -9,6 +9,7 @@ use Framework\Http\Exception\PayloadTooLargeHttpException;
 use Framework\Http\Middleware\MultipartBodyParser;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use Framework\Http\UploadedFile;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -183,6 +184,7 @@ final class MultipartBodyParserTest extends TestCase
             'files' => $r->files(),
         ]));
 
+        self::assertInstanceOf(Response::class, $response);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
         self::assertNull($body['form']);
@@ -204,6 +206,7 @@ final class MultipartBodyParserTest extends TestCase
             'files' => $r->files(),
         ]));
 
+        self::assertInstanceOf(Response::class, $response);
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
         self::assertNull($body['form']);
@@ -226,6 +229,7 @@ final class MultipartBodyParserTest extends TestCase
                 'files' => $r->files(),
             ]));
 
+            self::assertInstanceOf(Response::class, $response);
             $body = json_decode($response->body, true);
             self::assertIsArray($body);
             self::assertNull($body['form'], "{$method} should skip");
@@ -704,7 +708,7 @@ final class MultipartBodyParserTest extends TestCase
         $response = $this->withSuperglobals(
             ['email' => 'alice@example.com', 'password' => 's3cret'],
             [],
-            fn(): Response => $this->middleware->process($request, static function (Request $r): Response {
+            fn(): ResponseInterface => $this->middleware->process($request, static function (Request $r): Response {
                 $form = $r->form();
                 $files = $r->files();
                 self::assertIsArray($form);
@@ -716,6 +720,7 @@ final class MultipartBodyParserTest extends TestCase
             }),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(200, $response->status);
     }
 

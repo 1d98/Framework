@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Framework\Http\Middleware;
 
 use Framework\Http\Request\Request;
-use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 
 /**
  * Pre-bound dispatch node in a middleware chain. Each link holds its middleware
@@ -17,7 +17,7 @@ final class MiddlewareLink
 {
     /**
      * @param MiddlewareInterface  $middleware
-     * @param callable(Request): Response $next
+     * @param callable(Request): ResponseInterface $next
      */
     public function __construct(
         private readonly MiddlewareInterface $middleware,
@@ -25,9 +25,9 @@ final class MiddlewareLink
     ) {
     }
 
-    public function __invoke(Request $request): Response
+    public function __invoke(Request $request): ResponseInterface
     {
-        /** @var callable(Request): Response $next */
+        /** @var callable(Request): ResponseInterface $next */
         $next = $this->next;
         return $this->middleware->process($request, $next);
     }

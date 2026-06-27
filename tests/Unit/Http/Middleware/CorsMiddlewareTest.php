@@ -100,6 +100,7 @@ final class CorsMiddlewareTest extends TestCase
             self::fail('Preflight should short-circuit, handler must not be called');
         });
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(403, $response->status);
         self::assertSame('application/problem+json', $response->headers['Content-Type']);
         $body = json_decode($response->body, true);

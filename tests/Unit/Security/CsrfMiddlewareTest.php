@@ -7,6 +7,7 @@ namespace Framework\Tests\Unit\Security;
 use Framework\Http\Exception\BadRequestHttpException;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use Framework\Logging\LoggerInterface;
 use Framework\Security\CsrfMiddleware;
 use Framework\Security\SignedCookieJar;
@@ -57,7 +58,7 @@ final class CsrfMiddlewareTest extends TestCase
     public function testGetRequestGeneratesTokenAndSetsCookie(): void
     {
         $capturedRequest = null;
-        $response = $this->processAsSecure(function () use (&$capturedRequest): Response {
+        $response = $this->processAsSecure(function () use (&$capturedRequest): ResponseInterface {
             return $this->middleware->process(
                 new Request('GET', '/page', headers: ['x-forwarded-proto' => 'https']),
                 function (Request $r) use (&$capturedRequest): Response {
@@ -86,8 +87,9 @@ final class CsrfMiddlewareTest extends TestCase
             },
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(200, $response->status);
-        self::assertCount(0, $response->cookies(), 'Exempt path must not set a csrf cookie');
+        self::assertCount(0, $response->cookies, 'Exempt path must not set a csrf cookie');
         self::assertInstanceOf(Request::class, $capturedRequest);
         self::assertNull($capturedRequest->csrfToken(), 'Exempt path must not populate csrfToken');
     }
@@ -96,14 +98,15 @@ final class CsrfMiddlewareTest extends TestCase
     {
         $middleware = new CsrfMiddleware($this->jar, exemptPrefixes: ['/api/'], trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
 
-        $response = $this->processAsSecure(function () use ($middleware): Response {
+        $response = $this->processAsSecure(function () use ($middleware): ResponseInterface {
             return $middleware->process(
                 new Request('GET', '/api/v1/users', headers: ['x-forwarded-proto' => 'https']),
                 static fn(): Response => Response::json(['users' => []]),
             );
         });
 
-        self::assertCount(0, $response->cookies(), 'Exempt path must not generate a csrf cookie on safe methods either');
+        self::assertInstanceOf(Response::class, $response);
+        self::assertCount(0, $response->cookies, 'Exempt path must not generate a csrf cookie on safe methods either');
     }
 
     public function testNonExemptPathStillEnforcesCsrfWhenExemptListConfigured(): void
@@ -295,7 +298,7 @@ final class CsrfMiddlewareTest extends TestCase
         $signed = $this->jar->sign($token);
 
         $capturedRequest = null;
-        $response = $this->processAsSecure(function () use ($signed, &$capturedRequest): Response {
+        $response = $this->processAsSecure(function () use ($signed, &$capturedRequest): ResponseInterface {
             return $this->middleware->process(
                 new Request('GET', '/form', headers: ['x-forwarded-proto' => 'https'], cookies: [CsrfMiddleware::COOKIE_NAME => $signed]),
                 function (Request $r) use (&$capturedRequest): Response {
@@ -307,13 +310,14 @@ final class CsrfMiddlewareTest extends TestCase
 
         self::assertInstanceOf(Request::class, $capturedRequest);
         self::assertSame($token, $capturedRequest->csrfToken());
-        self::assertCount(0, $response->cookies(), 'No new cookie when existing one is valid');
+        self::assertInstanceOf(Response::class, $response);
+        self::assertCount(0, $response->cookies, 'No new cookie when existing one is valid');
     }
 
     public function testGetRequestWithInvalidSignatureClearsCookieAndDoesNotMintNew(): void
     {
         $capturedRequest = null;
-        $response = $this->processAsSecure(function () use (&$capturedRequest): Response {
+        $response = $this->processAsSecure(function () use (&$capturedRequest): ResponseInterface {
             return $this->middleware->process(
                 new Request(
                     'GET',
@@ -328,7 +332,8 @@ final class CsrfMiddlewareTest extends TestCase
             );
         });
 
-        self::assertCount(0, $response->cookies(), 'No new csrf cookie must be minted on signature failure (fixation guard)');
+        self::assertInstanceOf(Response::class, $response);
+        self::assertCount(0, $response->cookies, 'No new csrf cookie must be minted on signature failure (fixation guard)');
 
         $setCookieLines = $response->toHeaderLines();
         $clearingLines = array_values(array_filter(
@@ -349,7 +354,7 @@ final class CsrfMiddlewareTest extends TestCase
     public function testGetRequestWithEmptyCookieValueMintsNewToken(): void
     {
         $capturedRequest = null;
-        $response = $this->processAsSecure(function () use (&$capturedRequest): Response {
+        $response = $this->processAsSecure(function () use (&$capturedRequest): ResponseInterface {
             return $this->middleware->process(
                 new Request(
                     'GET',
@@ -367,13 +372,14 @@ final class CsrfMiddlewareTest extends TestCase
         self::assertInstanceOf(Request::class, $capturedRequest);
         self::assertNotNull($capturedRequest->csrfToken());
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $capturedRequest->csrfToken());
-        self::assertCount(1, $response->cookies(), 'Empty cookie value is treated as absent → a fresh token is minted');
+        self::assertInstanceOf(Response::class, $response);
+        self::assertCount(1, $response->cookies, 'Empty cookie value is treated as absent → a fresh token is minted');
     }
 
     public function testGetRequestWithoutAnyCookieMintsNewToken(): void
     {
         $capturedRequest = null;
-        $response = $this->processAsSecure(function () use (&$capturedRequest): Response {
+        $response = $this->processAsSecure(function () use (&$capturedRequest): ResponseInterface {
             return $this->middleware->process(
                 new Request('GET', '/form', headers: ['x-forwarded-proto' => 'https']),
                 function (Request $r) use (&$capturedRequest): Response {
@@ -385,7 +391,8 @@ final class CsrfMiddlewareTest extends TestCase
 
         self::assertInstanceOf(Request::class, $capturedRequest);
         self::assertNotNull($capturedRequest->csrfToken());
-        self::assertCount(1, $response->cookies(), 'Absent cookie must mint a fresh token (regression: existing happy path)');
+        self::assertInstanceOf(Response::class, $response);
+        self::assertCount(1, $response->cookies, 'Absent cookie must mint a fresh token (regression: existing happy path)');
     }
 
     public function testGetRequestWithValidSignedCookieReusesToken(): void
@@ -394,7 +401,7 @@ final class CsrfMiddlewareTest extends TestCase
         $signed = $this->jar->sign($token);
 
         $capturedRequest = null;
-        $response = $this->processAsSecure(function () use ($signed, &$capturedRequest): Response {
+        $response = $this->processAsSecure(function () use ($signed, &$capturedRequest): ResponseInterface {
             return $this->middleware->process(
                 new Request(
                     'GET',
@@ -411,13 +418,14 @@ final class CsrfMiddlewareTest extends TestCase
 
         self::assertInstanceOf(Request::class, $capturedRequest);
         self::assertSame($token, $capturedRequest->csrfToken());
-        self::assertCount(0, $response->cookies(), 'Valid existing token must be reused, not re-minted');
+        self::assertInstanceOf(Response::class, $response);
+        self::assertCount(0, $response->cookies, 'Valid existing token must be reused, not re-minted');
     }
 
     public function testOptionsPreflightGeneratesCsrfCookieButDoesNotValidate(): void
     {
         $capturedRequest = null;
-        $response = $this->processAsSecure(function () use (&$capturedRequest): Response {
+        $response = $this->processAsSecure(function () use (&$capturedRequest): ResponseInterface {
             return $this->middleware->process(
                 new Request(
                     'OPTIONS',
@@ -437,7 +445,8 @@ final class CsrfMiddlewareTest extends TestCase
 
         self::assertInstanceOf(Request::class, $capturedRequest);
         self::assertNotNull($capturedRequest->csrfToken());
-        $cookies = $response->cookies();
+        self::assertInstanceOf(Response::class, $response);
+        $cookies = $response->cookies;
         self::assertCount(1, $cookies);
         self::assertSame(CsrfMiddleware::COOKIE_NAME, $cookies[0]->name);
     }
@@ -665,14 +674,15 @@ final class CsrfMiddlewareTest extends TestCase
     {
         $middleware = new CsrfMiddleware($this->jar, trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
 
-        $response = $this->processAsSecure(function () use ($middleware): Response {
+        $response = $this->processAsSecure(function () use ($middleware): ResponseInterface {
             return $middleware->process(
                 new Request('GET', '/form', headers: ['x-forwarded-proto' => 'https']),
                 static fn(): Response => Response::text('ok'),
             );
         });
 
-        $cookies = $response->cookies();
+        self::assertInstanceOf(Response::class, $response);
+        $cookies = $response->cookies;
         self::assertCount(1, $cookies);
         self::assertTrue($cookies[0]->secure, 'HTTPS request from trusted proxy → secure=true on cookie');
     }
@@ -687,7 +697,7 @@ final class CsrfMiddlewareTest extends TestCase
         // that minting over an untrusted proxy throws LogicException.
         $threw = false;
         try {
-            $this->withRemoteAddr('198.51.100.5', function () use ($middleware): Response {
+            $this->withRemoteAddr('198.51.100.5', function () use ($middleware): ResponseInterface {
                 return $middleware->process(
                     new Request('GET', '/form', headers: ['x-forwarded-proto' => 'https']),
                     static fn(): Response => Response::text('ok'),

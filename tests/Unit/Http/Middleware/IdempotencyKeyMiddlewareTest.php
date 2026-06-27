@@ -14,6 +14,8 @@ use Framework\Http\Idempotency\InMemoryIdempotencyStore;
 use Framework\Http\Middleware\IdempotencyKeyMiddleware;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
+use Framework\Http\Response\StreamedResponse;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
@@ -38,9 +40,10 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
 
         $response = $middleware->process(
             $request,
-            static fn(): Response => Response::text('ok'),
+            static fn(): ResponseInterface => Response::text('ok'),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(200, $response->status);
         self::assertSame('ok', $response->body);
     }
@@ -53,7 +56,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
         $this->expectException(BadRequestHttpException::class);
         $middleware->process(
             $request,
-            static fn(): Response => Response::text('should not run'),
+            static fn(): ResponseInterface => Response::text('should not run'),
         );
     }
 
@@ -64,7 +67,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
 
         $response = $middleware->process(
             $request,
-            static fn(): Response => Response::text('ok'),
+            static fn(): ResponseInterface => Response::text('ok'),
         );
         self::assertSame(200, $response->status);
     }
@@ -89,6 +92,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
             },
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(1, $handlerCalls);
         self::assertSame(201, $response->status);
         self::assertNotNull($store->get('K-001', 'POST', '/orders', hash('sha256', '{"item":"widget"}')));
@@ -108,7 +112,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
 
         $first = $middleware->process(
             $request,
-            static fn(): Response => Response::json(['id' => 99], 201),
+            static fn(): ResponseInterface => Response::json(['id' => 99], 201),
         );
 
         $handlerCalls = 0;
@@ -120,6 +124,8 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
             },
         );
 
+        self::assertInstanceOf(Response::class, $first);
+        self::assertInstanceOf(Response::class, $second);
         self::assertSame(0, $handlerCalls, 'Handler must not run on replay');
         self::assertSame($first->status, $second->status);
         self::assertSame($first->body, $second->body);
@@ -136,7 +142,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
             headers: ['idempotency-key' => 'K-001'],
             body: '{"item":"widget"}',
         );
-        $middleware->process($first, static fn(): Response => Response::json(['id' => 99], 201));
+        $middleware->process($first, static fn(): ResponseInterface => Response::json(['id' => 99], 201));
 
         $retryWithDifferentBody = new Request(
             method: 'POST',
@@ -162,7 +168,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
             headers: ['idempotency-key' => 'K-001'],
             body: '{}',
         );
-        $middleware->process($first, static fn(): Response => Response::text('ok'));
+        $middleware->process($first, static fn(): ResponseInterface => Response::text('ok'));
 
         $retryAsDelete = new Request(
             method: 'DELETE',
@@ -190,7 +196,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
         $this->expectException(BadRequestHttpException::class);
         $middleware->process(
             $request,
-            static fn(): Response => Response::text('ok'),
+            static fn(): ResponseInterface => Response::text('ok'),
         );
     }
 
@@ -206,7 +212,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
         $this->expectException(BadRequestHttpException::class);
         $middleware->process(
             $request,
-            static fn(): Response => Response::text('ok'),
+            static fn(): ResponseInterface => Response::text('ok'),
         );
     }
 
@@ -222,7 +228,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
         $this->expectException(BadRequestHttpException::class);
         $middleware->process(
             $request,
-            static fn(): Response => Response::text('ok'),
+            static fn(): ResponseInterface => Response::text('ok'),
         );
     }
 
@@ -244,6 +250,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
             {
                 return 0;
             }
+            public function forget(string $key): void {}
         };
 
         $middleware = new IdempotencyKeyMiddleware(store: $store);
@@ -275,7 +282,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
             );
             $first = $middleware->process(
                 $request,
-                static fn(): Response => Response::text('first-response'),
+                static fn(): ResponseInterface => Response::text('first-response'),
             );
 
             $second = $middleware->process(
@@ -283,6 +290,8 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
                 static fn(): Response => self::fail('Handler must not run on replay'),
             );
 
+            self::assertInstanceOf(Response::class, $first);
+            self::assertInstanceOf(Response::class, $second);
             self::assertSame($first->status, $second->status);
             self::assertSame($first->body, $second->body);
             self::assertSame('true', $second->headers['Idempotency-Replayed']);
@@ -304,7 +313,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
                 headers: ['idempotency-key' => 'K-FS'],
                 body: 'first',
             );
-            $middleware->process($first, static fn(): Response => Response::text('r1'));
+            $middleware->process($first, static fn(): ResponseInterface => Response::text('r1'));
 
             $retry = new Request(
                 method: 'POST',
@@ -336,7 +345,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
 
         $first = $middleware->process(
             $request,
-            static fn(): Response => Response::empty(204)->withCookie(new Cookie('session', 'token-xyz')),
+            static fn(): ResponseInterface => Response::empty(204)->withCookie(new Cookie('session', 'token-xyz')),
         );
 
         $second = $middleware->process(
@@ -344,9 +353,11 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
             static fn(): Response => self::fail('Handler must not run on replay'),
         );
 
-        self::assertCount(1, $second->cookies());
-        self::assertSame('session', $second->cookies()[0]->name);
-        self::assertSame('token-xyz', $second->cookies()[0]->value);
+        self::assertInstanceOf(Response::class, $second);
+        $cookies = $second->cookies;
+        self::assertCount(1, $cookies);
+        self::assertSame('session', $cookies[0]->name);
+        self::assertSame('token-xyz', $cookies[0]->value);
     }
 
     public function testCustomMethodsArray(): void
@@ -360,7 +371,7 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
         );
         $response = $middleware->process(
             $request,
-            static fn(): Response => Response::text('ok'),
+            static fn(): ResponseInterface => Response::text('ok'),
         );
         self::assertSame(200, $response->status);
     }
@@ -375,5 +386,108 @@ final class IdempotencyKeyMiddlewareTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
         new IdempotencyKeyMiddleware(ttl: 0);
+    }
+
+    public function testStreamedResponsePassesThroughAndReleasesReservation(): void
+    {
+        // When a handler returns a StreamedResponse the middleware cannot
+        // serialise it for replay — the body is produced at send() time.
+        // The contract: pass the streamed response through unchanged AND
+        // release the reservation so the next request with the same key
+        // can re-execute the handler (instead of being rejected by the
+        // held reservation in tryReserve).
+        $store = new InMemoryIdempotencyStore();
+        $middleware = new IdempotencyKeyMiddleware(store: $store);
+        $request = new Request(
+            method: 'POST',
+            path: '/events',
+            headers: ['idempotency-key' => 'K-SSE'],
+            body: '{}',
+        );
+
+        $emitted = false;
+        $streamed = StreamedResponse::sse(static function ($_stream) use (&$emitted): void {
+            $emitted = true;
+        });
+
+        $response = $middleware->process(
+            $request,
+            static fn(): ResponseInterface => $streamed,
+        );
+
+        self::assertSame($streamed, $response, 'StreamedResponse must be passed through unchanged');
+        self::assertFalse($emitted, 'Emitters must not run inside the middleware — only at send() time');
+
+        // The reservation must have been released so the next request
+        // can re-execute (not 409 Conflict).
+        $handlerCalls = 0;
+        $second = $middleware->process(
+            $request,
+            static function () use (&$handlerCalls): Response {
+                $handlerCalls++;
+                return Response::json(['replayed' => false]);
+            },
+        );
+        self::assertSame(1, $handlerCalls, 'Second request must re-execute the handler (reservation was released)');
+        self::assertInstanceOf(Response::class, $second);
+        self::assertFalse($second->headers['Idempotency-Replayed'] ?? false);
+    }
+
+    public function testForgetIsInvokedOnStreamingResponse(): void
+    {
+        // Spy store: capture forget() calls and verify the streaming-response
+        // branch of the middleware invokes IdempotencyStoreInterface::forget().
+        $store = new \Framework\Tests\Unit\Http\Middleware\SpyIdempotencyStore();
+
+        $middleware = new IdempotencyKeyMiddleware(store: $store);
+        $request = new Request(
+            method: 'POST',
+            path: '/stream',
+            headers: ['idempotency-key' => 'K-FORGET'],
+        );
+
+        $middleware->process(
+            $request,
+            static fn(): ResponseInterface => StreamedResponse::ndjson(static function (): void {}),
+        );
+
+        self::assertSame(['K-FORGET'], $store->forgotten);
+    }
+}
+
+/**
+ * Spy {@see \Framework\Http\Idempotency\IdempotencyStoreInterface} used by
+ * {@see IdempotencyKeyMiddlewareTest::testForgetIsInvokedOnStreamingResponse()}
+ * to capture `forget()` invocations. Kept as a named class (not an anonymous
+ * class) so PHPStan recognises the `$forgotten` property as read by the
+ * outer test.
+ */
+final class SpyIdempotencyStore implements \Framework\Http\Idempotency\IdempotencyStoreInterface
+{
+    /** @var list<string> */
+    public array $forgotten = [];
+
+    public function get(string $key, string $method, string $path, string $bodyHash): ?IdempotencyEntry
+    {
+        return null;
+    }
+
+    public function put(string $key, string $method, string $path, string $bodyHash, IdempotencyEntry $entry): void
+    {
+    }
+
+    public function tryReserve(string $key, string $method, string $path, string $bodyHash): bool
+    {
+        return true;
+    }
+
+    public function sweep(int $olderThanSeconds): int
+    {
+        return 0;
+    }
+
+    public function forget(string $key): void
+    {
+        $this->forgotten[] = $key;
     }
 }

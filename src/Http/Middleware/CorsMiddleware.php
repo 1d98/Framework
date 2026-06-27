@@ -6,6 +6,7 @@ namespace Framework\Http\Middleware;
 
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use Framework\Http\Response\Vary;
 use InvalidArgumentException;
 
@@ -32,7 +33,7 @@ final class CorsMiddleware implements MiddlewareInterface
         }
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         $rawOrigin = $request->header('Origin');
         if ($rawOrigin === null) {
@@ -60,14 +61,14 @@ final class CorsMiddleware implements MiddlewareInterface
         return $this->decorateWithCorsHeaders($this->callNext($request, $next), $origin);
     }
 
-    private function callNext(Request $request, callable $next): Response
+    private function callNext(Request $request, callable $next): ResponseInterface
     {
-        /** @var Response $response */
+        /** @var ResponseInterface $response */
         $response = $next($request);
         return $response;
     }
 
-    private function handleNotWhitelisted(Request $request, callable $next): Response
+    private function handleNotWhitelisted(Request $request, callable $next): ResponseInterface
     {
         $isPreflight = $request->method === 'OPTIONS'
             && $request->header('Access-Control-Request-Method') !== null;
@@ -180,7 +181,7 @@ final class CorsMiddleware implements MiddlewareInterface
         return $out;
     }
 
-    private function decorateWithCorsHeaders(Response $response, string $origin): Response
+    private function decorateWithCorsHeaders(ResponseInterface $response, string $origin): ResponseInterface
     {
         $response = $response
             ->withHeader('Access-Control-Allow-Origin', $origin)

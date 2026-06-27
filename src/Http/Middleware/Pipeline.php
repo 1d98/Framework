@@ -7,7 +7,7 @@ namespace Framework\Http\Middleware;
 use Framework\Container\ContainerException;
 use Framework\Container\ContainerInterface;
 use Framework\Http\Request\Request;
-use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 
 final class Pipeline
 {
@@ -36,9 +36,9 @@ final class Pipeline
     }
 
     /**
-     * @param callable(Request): Response $core
+     * @param callable(Request): ResponseInterface $core
      */
-    public function process(Request $request, callable $core): Response
+    public function process(Request $request, callable $core): ResponseInterface
     {
         if ($this->middleware === []) {
             return $core($request);
@@ -48,7 +48,7 @@ final class Pipeline
     }
 
     /**
-     * @param callable(Request): Response $core
+     * @param callable(Request): ResponseInterface $core
      */
     private function compile(callable $core): MiddlewareLink
     {

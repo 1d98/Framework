@@ -10,6 +10,7 @@ use Framework\Http\Middleware\MiddlewareInterface;
 use Framework\Http\Middleware\Pipeline;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
@@ -29,6 +30,7 @@ final class PipelineClassStringTest extends TestCase
             static fn(): Response => Response::text('core'),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame('core', $response->body);
         self::assertSame('from-container', $response->headers['X-Tag'] ?? null);
     }
@@ -96,7 +98,7 @@ final class TagMiddleware implements MiddlewareInterface
     {
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         return $next($request)->withHeader('X-Tag', $this->tag);
     }

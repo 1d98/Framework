@@ -9,6 +9,7 @@ use Framework\Http\Exception\BadRequestHttpException;
 use Framework\Http\Middleware\HttpsRedirectMiddleware;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -58,7 +59,7 @@ final class HttpsRedirectMiddlewareTest extends TestCase
 
     public function testHttpsRequestPassesThrough(): void
     {
-        $response = $this->withRemoteAddr('127.0.0.1', function (): Response {
+        $response = $this->withRemoteAddr('127.0.0.1', function (): ResponseInterface {
             $middleware = new HttpsRedirectMiddleware(
                 trustedHosts: ['example.com'],
                 trustedProxies: ['127.0.0.1'],
@@ -67,9 +68,10 @@ final class HttpsRedirectMiddlewareTest extends TestCase
                 'host' => 'example.com',
                 'x-forwarded-proto' => 'https',
             ]);
-            return $middleware->process($request, static fn(): Response => Response::json(['ok' => true]));
+            return $middleware->process($request, static fn(): ResponseInterface => Response::json(['ok' => true]));
         });
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(200, $response->status);
         self::assertArrayNotHasKey('Location', $response->headers);
     }
@@ -139,7 +141,7 @@ final class HttpsRedirectMiddlewareTest extends TestCase
 
     public function testRedirectsWhenForwardedProtoComesFromUntrustedIp(): void
     {
-        $response = $this->withRemoteAddr('198.51.100.5', function (): Response {
+        $response = $this->withRemoteAddr('198.51.100.5', function (): ResponseInterface {
             $middleware = new HttpsRedirectMiddleware(
                 trustedHosts: ['example.com'],
                 trustedProxies: ['127.0.0.1'],
@@ -148,16 +150,17 @@ final class HttpsRedirectMiddlewareTest extends TestCase
                 'host' => 'example.com',
                 'x-forwarded-proto' => 'https',
             ]);
-            return $middleware->process($request, static fn(): Response => Response::json(['ok' => true]));
+            return $middleware->process($request, static fn(): ResponseInterface => Response::json(['ok' => true]));
         });
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(301, $response->status);
         self::assertSame('https://example.com/login', $response->headers['Location']);
     }
 
     public function testRejectsMultiValueForwardedProtoAndStillRedirects(): void
     {
-        $response = $this->withRemoteAddr('127.0.0.1', function (): Response {
+        $response = $this->withRemoteAddr('127.0.0.1', function (): ResponseInterface {
             $middleware = new HttpsRedirectMiddleware(
                 trustedHosts: ['example.com'],
                 trustedProxies: ['127.0.0.1'],
@@ -166,9 +169,10 @@ final class HttpsRedirectMiddlewareTest extends TestCase
                 'host' => 'example.com',
                 'x-forwarded-proto' => 'https, http',
             ]);
-            return $middleware->process($request, static fn(): Response => Response::json(['ok' => true]));
+            return $middleware->process($request, static fn(): ResponseInterface => Response::json(['ok' => true]));
         });
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(301, $response->status);
         self::assertSame('https://example.com/login', $response->headers['Location']);
     }

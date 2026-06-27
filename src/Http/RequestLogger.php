@@ -6,7 +6,7 @@ namespace Framework\Http;
 
 use Framework\Http\Exception\HttpException;
 use Framework\Http\Request\Request;
-use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use Framework\Logging\LoggerInterface;
 use Throwable;
 
@@ -22,7 +22,7 @@ final class RequestLogger
         return $this->logger;
     }
 
-    public function logHttpException(Throwable $e, Request $request, Response $response): void
+    public function logHttpException(Throwable $e, Request $request, ResponseInterface $response): void
     {
         if (!$e instanceof HttpException) {
             return;
@@ -39,7 +39,7 @@ final class RequestLogger
         $this->logger?->warning('http_exception', $context);
     }
 
-    public function logUnhandledException(Throwable $e, Request $request, Response $response): void
+    public function logUnhandledException(Throwable $e, Request $request, ResponseInterface $response): void
     {
         $context = $this->logContext($request, $e);
         $context['status'] = $response->status;

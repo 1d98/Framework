@@ -7,7 +7,7 @@ namespace Framework\Security;
 use Framework\Http\Exception\BadRequestHttpException;
 use Framework\Http\Middleware\MiddlewareInterface;
 use Framework\Http\Request\Request;
-use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use Framework\Logging\LoggerInterface;
 use Framework\Logging\NullLogger;
 use InvalidArgumentException;
@@ -105,7 +105,7 @@ final class CsrfMiddleware implements MiddlewareInterface
         $this->logger = $logger ?? new NullLogger();
     }
 
-    public function process(Request $request, callable $next): Response
+    public function process(Request $request, callable $next): ResponseInterface
     {
         if ($this->isExempt($request->path)) {
             return $this->callNext($request, $next);
@@ -133,7 +133,7 @@ final class CsrfMiddleware implements MiddlewareInterface
         return false;
     }
 
-    private function handleSafe(Request $request, callable $next): Response
+    private function handleSafe(Request $request, callable $next): ResponseInterface
     {
         $raw = $request->cookie(self::COOKIE_NAME);
 
@@ -194,7 +194,7 @@ final class CsrfMiddleware implements MiddlewareInterface
         return implode('; ', $parts);
     }
 
-    private function handleUnsafe(Request $request, callable $next): Response
+    private function handleUnsafe(Request $request, callable $next): ResponseInterface
     {
         $expected = $this->jar->read($request, self::COOKIE_NAME);
         if ($expected === null) {
@@ -235,9 +235,9 @@ final class CsrfMiddleware implements MiddlewareInterface
         return $this->callNext($request->withCsrfToken($expected), $next);
     }
 
-    private function callNext(Request $request, callable $next): Response
+    private function callNext(Request $request, callable $next): ResponseInterface
     {
-        /** @var Response $response */
+        /** @var ResponseInterface $response */
         $response = $next($request);
         return $response;
     }

@@ -7,6 +7,7 @@ namespace Framework\Tests\Unit\Http\Middleware;
 use Framework\Http\Middleware\SecurityHeadersMiddleware;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
@@ -41,7 +42,7 @@ final class SecurityHeadersMiddlewareTest extends TestCase
 
     public function testAddsHstsOnHttpsRequest(): void
     {
-        $response = $this->withRemoteAddr('127.0.0.1', static function (): Response {
+        $response = $this->withRemoteAddr('127.0.0.1', static function (): ResponseInterface {
             $middleware = new SecurityHeadersMiddleware(trustedProxies: ['127.0.0.1']);
             $request = new Request('GET', '/', '', ['x-forwarded-proto' => 'https']);
             return $middleware->process($request, static fn(Request $r): Response => Response::json([]));
@@ -94,7 +95,7 @@ final class SecurityHeadersMiddlewareTest extends TestCase
 
     public function testNullHstsOverridePreventsHstsOnHttps(): void
     {
-        $response = $this->withRemoteAddr('127.0.0.1', static function (): Response {
+        $response = $this->withRemoteAddr('127.0.0.1', static function (): ResponseInterface {
             $middleware = new SecurityHeadersMiddleware(
                 headers: ['Strict-Transport-Security' => null],
                 trustedProxies: ['127.0.0.1'],
@@ -108,7 +109,7 @@ final class SecurityHeadersMiddlewareTest extends TestCase
 
     public function testHstsIsNotEmittedWhenForwardedProtoComesFromUntrustedIp(): void
     {
-        $response = $this->withRemoteAddr('198.51.100.5', static function (): Response {
+        $response = $this->withRemoteAddr('198.51.100.5', static function (): ResponseInterface {
             $middleware = new SecurityHeadersMiddleware(trustedProxies: ['127.0.0.1']);
             $request = new Request('GET', '/', '', ['x-forwarded-proto' => 'https']);
             return $middleware->process($request, static fn(Request $r): Response => Response::json([]));
@@ -150,7 +151,7 @@ final class SecurityHeadersMiddlewareTest extends TestCase
 
     public function testHstsPreloadAppendsPreloadDirective(): void
     {
-        $response = $this->withRemoteAddr('127.0.0.1', static function (): Response {
+        $response = $this->withRemoteAddr('127.0.0.1', static function (): ResponseInterface {
             $middleware = new SecurityHeadersMiddleware(hstsPreload: true, trustedProxies: ['127.0.0.1']);
             $request = new Request('GET', '/', '', ['x-forwarded-proto' => 'https']);
             return $middleware->process($request, static fn(Request $r): Response => Response::json([]));
@@ -174,7 +175,7 @@ final class SecurityHeadersMiddlewareTest extends TestCase
 
     public function testHstsIncludeSubdomainsFalseOmitsDirective(): void
     {
-        $response = $this->withRemoteAddr('127.0.0.1', static function (): Response {
+        $response = $this->withRemoteAddr('127.0.0.1', static function (): ResponseInterface {
             $middleware = new SecurityHeadersMiddleware(hstsIncludeSubdomains: false, trustedProxies: ['127.0.0.1']);
             $request = new Request('GET', '/', '', ['x-forwarded-proto' => 'https']);
             return $middleware->process($request, static fn(Request $r): Response => Response::json([]));
@@ -185,7 +186,7 @@ final class SecurityHeadersMiddlewareTest extends TestCase
 
     public function testHstsPreloadOnly(): void
     {
-        $response = $this->withRemoteAddr('127.0.0.1', static function (): Response {
+        $response = $this->withRemoteAddr('127.0.0.1', static function (): ResponseInterface {
             $middleware = new SecurityHeadersMiddleware(
                 hstsIncludeSubdomains: false,
                 hstsPreload: true,

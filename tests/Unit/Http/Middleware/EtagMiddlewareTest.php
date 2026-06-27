@@ -9,6 +9,8 @@ use Framework\Http\Middleware\EtagMiddleware;
 use Framework\Http\Middleware\EtagPolicy;
 use Framework\Http\Request\Request;
 use Framework\Http\Response\Response;
+use Framework\Http\Response\ResponseInterface;
+use Framework\Http\Response\StreamedResponse;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
@@ -26,6 +28,7 @@ final class EtagMiddlewareTest extends TestCase
             static fn(): Response => Response::text('hello world'),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertArrayHasKey('ETag', $response->headers);
         self::assertMatchesRegularExpression('/^"[a-f0-9]{32}"$/', $response->headers['ETag']);
     }
@@ -37,6 +40,8 @@ final class EtagMiddlewareTest extends TestCase
         $r1 = $middleware->process(new Request('GET', '/a'), static fn(): Response => Response::text('same'));
         $r2 = $middleware->process(new Request('GET', '/b'), static fn(): Response => Response::text('same'));
 
+        self::assertInstanceOf(Response::class, $r1);
+        self::assertInstanceOf(Response::class, $r2);
         self::assertSame($r1->headers['ETag'], $r2->headers['ETag']);
     }
 
@@ -47,6 +52,8 @@ final class EtagMiddlewareTest extends TestCase
         $r1 = $middleware->process(new Request('GET', '/a'), static fn(): Response => Response::text('one'));
         $r2 = $middleware->process(new Request('GET', '/a'), static fn(): Response => Response::text('two'));
 
+        self::assertInstanceOf(Response::class, $r1);
+        self::assertInstanceOf(Response::class, $r2);
         self::assertNotSame($r1->headers['ETag'], $r2->headers['ETag']);
     }
 
@@ -57,6 +64,7 @@ final class EtagMiddlewareTest extends TestCase
             new Request('GET', '/users/42'),
             static fn(): Response => Response::text('hello'),
         );
+        self::assertInstanceOf(Response::class, $first);
         $etag = $first->headers['ETag'];
 
         $handlerCalled = false;
@@ -73,6 +81,7 @@ final class EtagMiddlewareTest extends TestCase
             },
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(304, $response->status);
         self::assertSame('', $response->body, 'Body must be empty on 304');
         self::assertSame($etag, $response->headers['ETag']);
@@ -96,6 +105,7 @@ final class EtagMiddlewareTest extends TestCase
             static fn(): Response => Response::text('hello'),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(200, $response->status);
         self::assertSame('hello', $response->body);
     }
@@ -113,6 +123,7 @@ final class EtagMiddlewareTest extends TestCase
             static fn(): Response => Response::text('hello'),
         );
 
+        self::assertInstanceOf(Response::class, $response);
         self::assertSame(304, $response->status);
     }
 
@@ -238,5 +249,24 @@ final class EtagMiddlewareTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('sha1');
         new EtagPolicy(algorithm: 'sha1');
+    }
+
+    public function testPassesStreamedResponseThroughWithoutAddingEtag(): void
+    {
+        // StreamedResponse bodies are produced at send() time and cannot
+        // be hashed for an etag. Pass through unchanged — the caller is
+        // responsible for setting their own ETag header on the streaming
+        // response if caching semantics are desired.
+        $middleware = new EtagMiddleware();
+        $streamed = StreamedResponse::sse(static function (): void {});
+        $request = new Request('GET', '/events');
+
+        $response = $middleware->process(
+            $request,
+            static fn(): ResponseInterface => $streamed,
+        );
+
+        self::assertSame($streamed, $response, 'StreamedResponse must be passed through unchanged');
+        self::assertArrayNotHasKey('ETag', $response->headers, 'EtagMiddleware must not install ETag on StreamedResponse');
     }
 }

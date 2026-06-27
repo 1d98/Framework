@@ -76,4 +76,21 @@ interface IdempotencyStoreInterface
      * filesystem mtime + startup sweep).
      */
     public function sweep(int $olderThanSeconds): int;
+
+    /**
+     * Drop a single entry by its `Idempotency-Key`. Called by
+     * {@see \Framework\Http\Middleware\IdempotencyKeyMiddleware}
+     * when the handler produced a response shape that cannot
+     * be cached for replay (currently a `StreamedResponse`,
+     * and any future `ResponseInterface` implementor the
+     * middleware does not know how to serialise). Releasing
+     * the reservation immediately lets the next request with
+     * the same key re-execute instead of being rejected by
+     * the held reservation in {@see self::tryReserve()}.
+     *
+     * **Idempotent.** Safe to call when no entry exists for
+     * `$key` (a no-op, no exception). The implementation
+     * MUST NOT throw on a missing entry.
+     */
+    public function forget(string $key): void;
 }

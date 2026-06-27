@@ -196,6 +196,8 @@ Content-Type: application/problem+json
 
 To override in a single handler, catch `ValidationException` **after** `bind()` and return your own response.
 
+> **Since 0.6.3** the `RequestErrorRenderer` ctor defaults `redactTrace: true` ([`src/Http/RequestErrorRenderer.php:29`](../../src/Http/RequestErrorRenderer.php)) — a forgotten `$debug=true` in production no longer leaks stack frames to the public. To restore the old behaviour in development, build your own renderer with `new RequestErrorRenderer(debug: true, redactTrace: false)` and pass it to `HttpKernel`'s `$errorRenderer` arg. The `StructuredErrorRenderer` already had this knob and is unchanged. See the [HTTP kernel chapter](http-kernel.md#requesterrorrenderer-legacy-default).
+
 ## Common pitfalls
 
 > **Forgetting `withValidator()`.** `$req->bind(...)` throws `LogicException('Validator not configured')` if the request wasn't wired. Always pass `withValidator($container->get(Validator::class))` in your entry point.

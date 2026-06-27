@@ -14,9 +14,16 @@ use PHPUnit\Framework\TestCase;
 #[CoversClass(SignedCookieJar::class)]
 final class SignedCookieJarTest extends TestCase
 {
+    /**
+     * 32-character secret — well above the {@see SignedCookieJar::MIN_SECRET_BYTES}
+     * 16-byte minimum. Used as the default fixture for tests that do not care about
+     * the specific secret value but need a long enough one to construct the jar.
+     */
+    private const string SECRET = 'unit-test-secret-32-chars-long';
+
     public function testSignPayloadRoundtrip(): void
     {
-        $jar = new SignedCookieJar('super-secret-key');
+        $jar = new SignedCookieJar(self::SECRET);
 
         $signed = $jar->sign('user_42');
         self::assertSame('user_42', $jar->payload($signed));
@@ -24,7 +31,7 @@ final class SignedCookieJarTest extends TestCase
 
     public function testSignWithEmptyValueRoundtrips(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
 
         $signed = $jar->sign('');
         self::assertStringStartsWith('.', $signed);
@@ -33,14 +40,14 @@ final class SignedCookieJarTest extends TestCase
 
     public function testPayloadReturnsNullForMissingDot(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
 
         self::assertNull($jar->payload('no-separator'));
     }
 
     public function testPayloadReturnsNullForTamperedValue(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
         $signed = $jar->sign('user_42');
         $dotPos = strpos($signed, '.');
         self::assertIsInt($dotPos);
@@ -51,7 +58,7 @@ final class SignedCookieJarTest extends TestCase
 
     public function testPayloadReturnsNullForTamperedSignature(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
         $signed = $jar->sign('user_42');
         $dotPos = strpos($signed, '.');
         $tampered = substr($signed, 0, $dotPos + 1) . 'AAAA' . substr($signed, $dotPos + 5);
@@ -61,15 +68,15 @@ final class SignedCookieJarTest extends TestCase
 
     public function testPayloadReturnsNullForInvalidBase64Signature(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
 
         self::assertNull($jar->payload('user_42.!!!not-base64!!!'));
     }
 
     public function testPayloadReturnsNullForSignatureFromDifferentSecret(): void
     {
-        $jarA = new SignedCookieJar('secret-A');
-        $jarB = new SignedCookieJar('secret-B');
+        $jarA = new SignedCookieJar('secret-A-long-enough-32-bytes-yes');
+        $jarB = new SignedCookieJar('secret-B-long-enough-32-bytes-yes');
 
         $signedFromA = $jarA->sign('value');
 
@@ -78,7 +85,7 @@ final class SignedCookieJarTest extends TestCase
 
     public function testPayloadWithExtraDotsSplitsOnFirst(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
         $signed = $jar->sign('value');
 
         $parts = explode('.', $signed, 2);
@@ -94,7 +101,7 @@ final class SignedCookieJarTest extends TestCase
 
     public function testVerifyReturnsTrueForValidSignature(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
         $signed = $jar->sign('user_42');
 
         self::assertTrue($jar->verify($signed));
@@ -102,29 +109,29 @@ final class SignedCookieJarTest extends TestCase
 
     public function testVerifyReturnsFalseForInvalidSignature(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
 
         self::assertFalse($jar->verify('garbage.invalidsig'));
     }
 
     public function testVerifyReturnsFalseForMultipleSegments(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
 
         self::assertFalse($jar->verify('no.sig.here'));
     }
 
     public function testVerifyReturnsFalseForEmptyString(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
 
         self::assertFalse($jar->verify(''));
     }
 
     public function testVerifyReturnsFalseForSignatureFromDifferentSecret(): void
     {
-        $jarA = new SignedCookieJar('secret-A');
-        $jarB = new SignedCookieJar('secret-B');
+        $jarA = new SignedCookieJar('secret-A-long-enough-32-bytes-yes');
+        $jarB = new SignedCookieJar('secret-B-long-enough-32-bytes-yes');
 
         $signedFromA = $jarA->sign('value');
 
@@ -147,25 +154,73 @@ final class SignedCookieJarTest extends TestCase
         new SignedCookieJar('   ');
     }
 
+    public function testConstructorRejectsShortSecret(): void
+    {
+        // 15 bytes — one byte below the MIN_SECRET_BYTES = 16 floor.
+        // 'fifteen-bytes-xx' is intentionally crafted to be exactly 15
+        // bytes (f-i-f-t-e-e-n + -bytes- + x = 15 chars).
+        $shortSecret = 'fifteen-bytes-x';
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('secret is too short');
+        $this->expectExceptionMessage('minimum is 16');
+
+        new SignedCookieJar($shortSecret);
+    }
+
+    public function testConstructorAcceptsSecretAtExactly16Bytes(): void
+    {
+        $exactSecret = str_repeat('a', 16);
+
+        $jar = new SignedCookieJar($exactSecret);
+
+        // Sanity check: round-trips through sign/payload.
+        $signed = $jar->sign('hello');
+        self::assertSame('hello', $jar->payload($signed));
+    }
+
     public function testConstructorThrowsOnUnsupportedAlgorithm(): void
     {
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('unsupported algorithm');
 
-        new SignedCookieJar('key', 'fake-algo-999');
+        new SignedCookieJar(self::SECRET, 'fake-algo-999');
     }
 
-    public function testConstructorAcceptsSha1AndMd5Algorithms(): void
+    public function testConstructorRejectsSha1Algorithm(): void
     {
-        new SignedCookieJar('key', 'sha1');
-        new SignedCookieJar('key', 'md5');
+        // sha1 is no longer in the allowlist — defense against collision attacks
+        // on session-bearing cookies.
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('unsupported algorithm');
+        $this->expectExceptionMessage('sha1');
 
-        $this->expectNotToPerformAssertions();
+        new SignedCookieJar(self::SECRET, 'sha1');
+    }
+
+    public function testConstructorRejectsMd5Algorithm(): void
+    {
+        // md5 has been broken since 2004; we explicitly reject it from the start.
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('unsupported algorithm');
+        $this->expectExceptionMessage('md5');
+
+        new SignedCookieJar(self::SECRET, 'md5');
+    }
+
+    public function testConstructorAcceptsSha3Algorithms(): void
+    {
+        // SHA-3 family is in the allowlist — verify each variant constructs cleanly.
+        foreach (['sha3-256', 'sha3-384', 'sha3-512'] as $algo) {
+            $jar = new SignedCookieJar(self::SECRET, $algo);
+            $signed = $jar->sign('payload-' . $algo);
+            self::assertSame('payload-' . $algo, $jar->payload($signed));
+        }
     }
 
     public function testMakeCookieReturnsCookieWithSignedValue(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
         $cookie = $jar->makeCookie('session', 'alice', expiresAt: 0, secure: true);
 
         self::assertInstanceOf(Cookie::class, $cookie);
@@ -179,7 +234,7 @@ final class SignedCookieJarTest extends TestCase
 
     public function testReadFromRequestReturnsVerifiedValue(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
         $request = new Request('GET', '/', '', [], '', null, null, null, [
             'session' => $jar->sign('alice'),
         ]);
@@ -189,7 +244,7 @@ final class SignedCookieJarTest extends TestCase
 
     public function testReadReturnsNullForMissingCookie(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
         $request = new Request('GET', '/');
 
         self::assertNull($jar->read($request, 'session'));
@@ -197,7 +252,7 @@ final class SignedCookieJarTest extends TestCase
 
     public function testReadReturnsNullForTamperedCookie(): void
     {
-        $jar = new SignedCookieJar('key');
+        $jar = new SignedCookieJar(self::SECRET);
         $request = new Request('GET', '/', '', [], '', null, null, null, [
             'session' => 'alice.badSig',
         ]);

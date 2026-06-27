@@ -14,7 +14,7 @@ What this is: every security control the framework ships, why it exists, and a w
 
 `CsrfMiddleware` ([`src/Security/CsrfMiddleware.php`](../../src/Security/CsrfMiddleware.php)) implements the **signed-cookie double-submit** pattern:
 
-- On safe methods (`GET`, `HEAD`, `OPTIONS`) with no `csrf_token` cookie, generate a 32-byte random token, attach to the request, `Set-Cookie: csrf_token=<signed>; HttpOnly; SameSite=Lax`.
+- On safe methods (`GET`, `HEAD`, `OPTIONS`) with no `__Host-csrf_token` cookie, generate a 32-byte random token, attach to the request, `Set-Cookie: __Host-csrf_token=<signed>; Secure; Path=/; HttpOnly; SameSite=Lax`. The `__Host-` prefix pins the cookie to `Secure`, `Path=/`, and no `Domain=` (RFC 6265bis).
 - On unsafe methods (`POST`, `PUT`, `PATCH`, `DELETE`), compare the `X-CSRF-Token` header (or `_token` form field) against the signed cookie. A mismatch throws `BadRequestHttpException` (400).
 
 ```php
@@ -61,7 +61,7 @@ The HMAC prevents forging (e.g. `session=admin`) without the secret. For opaque 
 | `X-Content-Type-Options` | `nosniff` |
 | `X-Frame-Options` | `DENY` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'nonce-<random>'; style-src 'self' 'nonce-<random>'` |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'nonce-<random>'; style-src 'self' 'nonce-<random>'; frame-ancestors 'none'` |
 | `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` (only on real HTTPS) |
 | `X-CSP-Nonce` | the per-request nonce |
 
@@ -167,7 +167,81 @@ $pipeline->pipe(new RateLimitMiddleware(
 $pipeline->pipe(CsrfMiddleware::class);
 ```
 
-This single endpoint is protected by **CSRF** (form submission without a valid `csrf_token` cookie → 400), **Rate limit** (5 burst, then 1 per 10 seconds keyed by IP → 429), **Body cap** (10 MiB hard limit), **Validation** (email and password length → 422), and **HSTS** (set by `SecurityHeadersMiddleware` only on a real HTTPS connection).
+This single endpoint is protected by **CSRF** (form submission without a valid `__Host-csrf_token` cookie → 400), **Rate limit** (5 burst, then 1 per 10 seconds keyed by IP → 429), **Body cap** (10 MiB hard limit), **Validation** (email and password length → 422), and **HSTS** (set by `SecurityHeadersMiddleware` only on a real HTTPS connection).
+
+## 0.6.3 hardening
+
+A single defensive pass on the surface that faces the network and the filesystem. Each item is also documented in `CHANGELOG.md`; this page is the "how do I live with it" guide.
+
+### `RequestErrorRenderer` defaults to `redactTrace: true`
+
+`RequestErrorRenderer` ([`src/Http/RequestErrorRenderer.php:29`](../../src/Http/RequestErrorRenderer.php)) used to leak stack frames whenever `debug: true` was passed. From 0.6.3 on, `redactTrace` defaults to `true` — `debug` is internally overridden to `false` for the rendering call, so the `trace` field of a 5xx body is suppressed regardless of how the renderer was constructed. This is the safe production default; to restore the prior behaviour in development, opt out explicitly:
+
+```php
+use Framework\Http\RequestErrorRenderer;
+
+// Production — safe default, no opt-in required
+$renderer = new RequestErrorRenderer(debug: false);
+
+// Development — restore the old behaviour
+$renderer = new RequestErrorRenderer(debug: true, redactTrace: false);
+```
+
+> **Common pitfall.** Wiring `$kernel = new HttpKernel(..., debug: true)` is **not enough** — the legacy `RequestErrorRenderer` ctor takes its own `$debug` flag, and the safe default (`redactTrace: true`) now wins on that flag too. To see stack frames in development, build your own renderer and pass it via the `$errorRenderer` ctor arg.
+
+### CSRF cookie rename + plain-HTTP refusal
+
+The cookie is now `__Host-csrf_token` (`src/Security/CsrfMiddleware.php:25`). The `__Host-` prefix is enforced by every browser since ~2020 — the cookie MUST be served with `Secure`, MUST NOT carry a `Domain=` attribute, and MUST use `Path=/`. Browsers silently drop the cookie if any rule is violated, so the middleware refuses to mint over a connection it cannot prove is HTTPS:
+
+```
+LogicException: CsrfMiddleware: refusing to mint a `__Host-csrf_token` cookie
+over an insecure connection. The `__Host-` cookie prefix requires Secure,
+which requires HTTPS.
+```
+
+The exception is thrown on the first safe request over plain HTTP. Fix one of:
+1. Serve over HTTPS (production: required).
+2. Behind a TLS-terminating proxy (load balancer, nginx, Cloudflare), pass `trustedProxies` to `CsrfMiddleware` so `Request::isSecure()` honours `X-Forwarded-Proto: https` from the proxy.
+3. Dev only — exempt the unsafe paths via `exemptPrefixes` / `exemptPaths` AND downgrade the cookie name to a non-`__Host-` value via a subclass.
+
+**Migration.** Pre-0.6.3 handlers that read the raw cookie name must update. Worked example:
+
+```php
+// Before (0.6.2 and earlier)
+$rawToken = $request->cookie('csrf_token');
+$token = $jar->payload($rawToken ?? '') ?? null;
+
+// After (0.6.3+) — read by the middleware constant
+use Framework\Security\CsrfMiddleware;
+
+$rawToken = $request->cookie(CsrfMiddleware::COOKIE_NAME);
+$token = $jar->payload($rawToken ?? '') ?? null;
+
+// Or, preferred: rely on the middleware to attach the plaintext token
+$token = $request->csrfToken();
+```
+
+The `$request->csrfToken()` accessor is set by `CsrfMiddleware` after verifying the signed cookie, so the canonical reader path needs no migration at all.
+
+### `FilenameSanitizer` strips path traversal
+
+`FilenameSanitizer` ([`src/Http/Multipart/FilenameSanitizer.php`](../../src/Http/Multipart/FilenameSanitizer.php)) now strips CR/LF/NUL **and** `/`, `\`, leading dots, and Windows-reserved basenames (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`), then caps the result at 200 bytes. The sanitized name lands in `UploadedFile::$name`; the original `Content-Disposition: filename=` is **not** preserved.
+
+Operators who compose upload paths with `$file->name` must sanitize explicitly — the framework no longer passes the raw client-supplied name through. Either build paths with a server-generated prefix or pass the sanitizer output as the on-disk name:
+
+```php
+use Framework\Http\Multipart\FilenameSanitizer;
+
+$target = '/uploads/' . bin2hex(random_bytes(16)) . '/' . FilenameSanitizer::sanitize($file->name);
+```
+
+`../../etc/cron.d/backdoor` collapses to `etc.cron.dbackdoor`; `CON.txt` collapses to `.txt`; an empty result falls back to `file`. See [the `UploadedFile` section](#uploaded-file--uploadedfile) above for the full upload flow.
+
+### `StreamLogger` chmod 0600
+
+`StreamLogger` ([`src/Logging/StreamLogger.php:60`](../../src/Logging/StreamLogger.php)) calls `@chmod($stream, 0o600)` immediately after opening a filesystem path. The `@` is intentional — FAT, FUSE, and Windows refuse chmod and the logger must not crash on them; the chmod is best-effort, the rest of the write path is unchanged.
+
+Pre-opened stream resources (`StreamLogger::stderr()`, `StreamLogger::stdout()`, or a `fopen()` you supplied yourself) are not chmod-ed — the logger does not own the file. If you pre-open a log file and want 0600, chmod it yourself before passing the resource in.
 
 ## Common pitfalls
 

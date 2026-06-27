@@ -35,6 +35,41 @@ $document = $exporter->build($router);
 file_put_contents('public/openapi.json', $document->toJson(JSON_PRETTY_PRINT));
 ```
 
+## Excluding routes from the document
+
+`OpenApiExporter` ([`src/OpenApi/OpenApiExporter.php:64`](../../src/OpenApi/OpenApiExporter.php)) accepts an `excludePatterns` ctor argument and a fluent `withExcludePatterns()` builder for ad-hoc exclusion. Each entry is treated as one of two shapes:
+
+- **Delimiter-wrapped regex** — anything whose first and last character are the same and belong to the common delimiter set `['/', '#', '~', '|', '!', '%', '@']` is run through `preg_match` (errors suppressed, mismatches fall through). `/_internal/`, `#^/health$#`, `#^/admin/#`, `~/foo~` all qualify. This is the common case for path-like entries (which almost always start and end with `/`).
+- **Literal string** — anything that does NOT look like a regex is treated as a literal prefix. The entry is trimmed of a trailing `/`, then the route path matches if it equals the pattern or starts with `<pattern>/`. Useful for non-delimited entries that are exact prefix strings without regex metacharacters.
+
+```php
+use Framework\OpenApi\OpenApiExporter;
+
+// Ctor: exclude at construction. All three entries below qualify as
+// delimiter-wrapped regexes (`/` and `#` are both delimiters).
+$exporter = new OpenApiExporter(
+    title: 'My API',
+    version: '1.0.0',
+    excludePatterns: [
+        '/_internal/',          // matches /_internal, /_internal/foo, /_internal/...
+        '#^/health$#',          // exact match: only /health
+        '#^/admin/#',           // matches /admin, /admin/foo, ...
+    ],
+);
+
+// Builder: add to an existing exporter (CLI flag uses this)
+$exporter = $exporter->withExcludePatterns(['/_debug/']);
+```
+
+CLI:
+
+```bash
+$ php bin/framework routes:openapi --exclude='/_internal/,#^/health$#,/_debug/'
+Wrote 1234 bytes to public/openapi.json
+```
+
+The `--exclude` flag takes a comma-separated list and is appended to whatever `excludePatterns` were set on the wired exporter. The flag was added in 0.6.3; pre-0.6.3 invocations without the flag are unchanged.
+
 ## CLI
 
 ```
@@ -56,7 +91,7 @@ $ php bin/framework routes:list --json
 
 | Source | OpenAPI field |
 |---|---|
-| `Router::getRoutes()` iteration | `paths.<URI>.<method>` keys |
+| `Router::getRoutes()` iteration (after `excludePatterns` filter) | `paths.<URI>.<method>` keys |
 | `{name}` path segments | `paths.<URI>.<method>.parameters[]` entries |
 | `where($name, $regex)` constraints | `parameter.schema.pattern` |
 | `Route` path with trailing `*` | `paths.<URI>.parameters[].restOfPath` (wildcard, flagged for review) |

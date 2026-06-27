@@ -47,11 +47,15 @@ final class TrustedProxiesIntegrationTest extends LiveHttpTestCase
 
         self::assertSame(200, $response['code']);
         $setCookie = $this->cookieHeader($response);
-        self::assertStringContainsString('csrf_token=', $setCookie);
+        // The cookie MUST carry the `__Host-` prefix (RFC 6265bis) so
+        // a subdomain's lax cookie policy cannot shadow it. The prefix
+        // implies Secure, and we additionally assert that Secure is
+        // present on the Set-Cookie header.
+        self::assertStringContainsString('__Host-csrf_token=', $setCookie);
         self::assertMatchesRegularExpression(
             '/\bSecure\b/i',
             $setCookie,
-            'csrf_token cookie from trusted-proxy https request must set Secure flag',
+            '__Host-csrf_token cookie from trusted-proxy https request must set Secure flag',
         );
     }
 }

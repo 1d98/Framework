@@ -18,6 +18,10 @@ use Framework\Http\Request\Request;
  *    `xxh128` (fast, 128-bit, non-cryptographic — fine for
  *    general-purpose cache validation). `sha256` for
  *    collision-sensitive APIs (idempotency tokens, etc.).
+ *    The constructor restricts the algorithm to a fixed
+ *    allowlist (`xxh128`, `sha256`) — narrower than what
+ *    `hash_algos()` would permit — to avoid ever emitting
+ *    etags derived from broken or platform-specific hashes.
  *  - `weak`: emit a `W/`-prefixed etag (semantic-equivalent
  *    match). Default `false` (strong, byte-exact).
  *  - `skip`: closure that decides per-request whether to skip
@@ -30,6 +34,16 @@ use Framework\Http\Request\Request;
 final readonly class EtagPolicy
 {
     /**
+     * Whitelisted hash algorithms for etag generation. Narrower
+     * than `hash_algos()` on purpose — we want every emitted
+     * etag to be derived from a hash that is known-stable across
+     * PHP versions and platforms.
+     *
+     * @var list<string>
+     */
+    public const array ALLOWED_ALGORITHMS = ['xxh128', 'sha256'];
+
+    /**
      * @param list<string> $ifMatchPaths
      */
     public function __construct(
@@ -38,9 +52,10 @@ final readonly class EtagPolicy
         public ?Closure $skip = null,
         public array $ifMatchPaths = [],
     ) {
-        if (!in_array($algorithm, ['xxh128', 'sha256', 'sha1', 'md5'], true)) {
+        if (!in_array($algorithm, self::ALLOWED_ALGORITHMS, true)) {
             throw new \InvalidArgumentException(
-                "EtagPolicy: unsupported algorithm '{$algorithm}' (use xxh128, sha256, sha1, or md5)",
+                "EtagPolicy: unsupported algorithm '{$algorithm}' "
+                . "(allowed: " . implode(', ', self::ALLOWED_ALGORITHMS) . ')',
             );
         }
     }

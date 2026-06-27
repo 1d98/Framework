@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-06-28
+
+### Security
+- **`SignedCookieJar` algorithm allowlist and minimum secret length** (`src/Security/SignedCookieJar.php:26`). The ctor now rejects any algorithm not in `ALLOWED_ALGORITHMS = ['sha256', 'sha384', 'sha512', 'sha3-256', 'sha3-384', 'sha3-512']` and refuses secrets shorter than `MIN_SECRET_BYTES = 16` (128 bits, the HMAC floor). Operators with a sub-16-byte stub secret get a clear error at boot — `Generate a fresh secret with php bin/framework app:secret` — instead of a silently weak cookie at the first forged-cookie incident.
+- **`Cookie` rejects CR / LF / NUL in name, value, path, and domain** (`src/Http/Cookie/Cookie.php:80`). `Cookie::assertNoCrlf()` is now called from both the ctor and `toHeaderValue()` on every string field, closing the header-injection path for any `Set-Cookie` constructed via the typed class.
+- **`CsrfMiddleware` cookie renamed to `__Host-csrf_token`; refuses to mint over plain HTTP** (`src/Security/CsrfMiddleware.php:25`). The `__Host-` prefix pins `Secure`, `Path=/`, no `Domain=`. Browsers silently drop the cookie if any rule is violated, so the middleware now throws `LogicException` on the first safe request over an insecure connection (`Request::isSecure()` false) — failing loud beats a CSRF token that never reaches the browser.
+- **`EtagPolicy` algorithm allowlist trimmed to `['xxh128', 'sha256']`** (`src/Http/Middleware/EtagPolicy.php:44`). The constructor previously accepted a wider set; `md5`, `sha1`, and any other `hash_algos()` value now throw `InvalidArgumentException` at boot. The two remaining algorithms are stable across PHP 8.5 versions and platforms.
+- **`StreamLogger` chmod 0600 on path-opened streams** (`src/Logging/StreamLogger.php:60`). When the constructor opens a filesystem path itself (`new StreamLogger('/var/log/app.log')`), it now `@chmod($stream, 0o600)` immediately after `fopen()` so a mis-set umask / shared-host default cannot leave the log file world-readable. Errors are intentionally suppressed — FAT, FUSE, and Windows refuse chmod and the logger must not crash on them.
+- **`FilenameSanitizer` defangs path traversal and Windows-reserved basenames** (`src/Http/Multipart/FilenameSanitizer.php`). Beyond the existing CR/LF/NUL strip, the sanitizer now strips `/` and `\`, lstrip leading dots, drops reserved basenames (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9` — case-insensitive), caps the result at `MAX_FILENAME_BYTES = 200`, and falls back to `'file'` on empty input. `../../etc/cron.d/backdoor` and `CON.txt` are no longer reachable from `UploadedFile::$name`.
+- **`SecurityHeadersMiddleware` default CSP now includes `frame-ancestors 'none'`** (`src/Http/Middleware/SecurityHeadersMiddleware.php:16`). Both the bare default and the nonce-built CSP carry the directive, closing the clickjacking gap on top of the existing `X-Frame-Options: DENY` header. Override the entire CSP via the `$csp` ctor arg if you need to embed.
+
+### Changed
+- **`RequestErrorRenderer` ctor picks up an optional `redactTrace` flag** (`src/Http/RequestErrorRenderer.php:29`). Default `true` — when set, `debug` is overridden to `false` inside `render()` so stack traces NEVER appear in the response body, even when `debug: true` is also passed. The previous one-arg shape still works (default on the new arg is the safe one).
+- **`OpenApiExporter` ctor accepts an `excludePatterns` list and gains `withExcludePatterns()`** (`src/OpenApi/OpenApiExporter.php:64`). Each entry is treated as a delimiter-wrapped regex (when its first and last char are the same and in `['/', '#', '~', '|', '!', '%', '@']`) or as a literal-prefix match otherwise. `/_internal/`, `#^/admin/#`, `#^/health$#` are all common shapes. Existing 5-arg callers keep working — the new arg is optional.
+- **`CorsMiddleware` default `$maxAge` is 300 seconds** (`src/Http/Middleware/CorsMiddleware.php:28`). Previously 86400 (24h) — RFC 7234 § 4.2.2 only mandates a positive integer; the shorter default limits how long a misconfigured preflight response can pin a stale `Access-Control-Allow-Headers` set in the browser cache. The ctor still accepts an explicit `$maxAge` for callers who need a longer window.
+
+### Fixed
+- **`CsrfMiddleware::clearingSetCookieHeader` uses the `__Host-` prefixed cookie name** (`src/Security/CsrfMiddleware.php:190`). After the rename, the cookie-clearing header emitted on a stale-token safe request would have targeted the old `csrf_token` cookie; both branches now use `self::COOKIE_NAME` (`__Host-csrf_token`), so the constants agree and the stale token is actually cleared.
+
+### Backwards compatibility
+- **CSRF cookie renamed `csrf_token` → `__Host-csrf_token`** (`src/Security/CsrfMiddleware.php:25`). The `__Host-` prefix forces `Secure: true`, `Path=/`, and no `Domain=` attribute; the cookie is refused by every conforming browser over plain HTTP. Any custom handler that reads the raw cookie name must update to `__Host-csrf_token` (or, better, use `CsrfMiddleware::COOKIE_NAME` so a future rename is a one-line change). The recommended pattern is `$request->cookie(CsrfMiddleware::COOKIE_NAME)` or simply `$request->csrfToken()` (set by the middleware on the request).
+- **`OpenApiExporter` ctor picks up a new optional 6th argument** (`src/OpenApi/OpenApiExporter.php:64`). Existing 5-argument callers keep working without modification. CLI: `routes:openapi` adds `--exclude=<p1,p2,…>` (comma-separated list of regex or literal-prefix entries); pre-0.6.3 invocations without the flag are unchanged.
+
+### Migration
+- **5xx error responses no longer include stack frames by default**, even with `APP_DEBUG=1` (`src/Http/RequestErrorRenderer.php:29`). The new `RequestErrorRenderer` defaults `redactTrace` to `true` (the safe production value); to restore the prior behaviour in development, pass `new RequestErrorRenderer(debug: true, redactTrace: false)`. The kernel does not auto-wire `redactTrace` from `APP_DEBUG` — the kernel-level default is the safe one. Existing 1-arg call sites compile unchanged because the new arg defaults to `true`.
+- **`FilenameSanitizer` now strips path separators and `..`** (`src/Http/Multipart/FilenameSanitizer.php:61`). Operators who compose upload paths with `$file->name` (`/uploads/{$file->name}`, `{$file->name}.bin`, etc.) must now sanitize explicitly — the framework no longer passes the original `Content-Disposition: filename=` through. Either build paths with a server-generated random prefix (`/uploads/{$uuid}/{$file->name}`) or pass the sanitizer output (`\Framework\Http\Multipart\FilenameSanitizer::sanitize($file->name)`) as the on-disk name.
+
+[0.6.3]: https://github.com/1d98/framework/compare/v0.6.2...v0.6.3
+
 ## [0.6.2] - 2026-06-15
 
 ### Fixed

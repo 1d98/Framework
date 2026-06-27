@@ -25,8 +25,11 @@ final class SecurityHeadersMiddlewareTest extends TestCase
         self::assertSame('strict-origin-when-cross-origin', $response->headers['Referrer-Policy']);
 
         $csp = $response->headers['Content-Security-Policy'];
+        // The CSP MUST include `frame-ancestors 'none'` — it is the
+        // CSP-native equivalent of `X-Frame-Options: DENY` and works
+        // inside framed iframes that ignore the older header.
         self::assertMatchesRegularExpression(
-            "/^default-src 'self'; script-src 'self' 'nonce-[A-Za-z0-9_-]{22}'; style-src 'self' 'nonce-[A-Za-z0-9_-]{22}'\$/",
+            "/^default-src 'self'; script-src 'self' 'nonce-[A-Za-z0-9_-]{22}'; style-src 'self' 'nonce-[A-Za-z0-9_-]{22}'; frame-ancestors 'none'\$/",
             $csp,
         );
         preg_match_all("/'nonce-([A-Za-z0-9_-]{22})'/", $csp, $all);
@@ -204,7 +207,7 @@ final class SecurityHeadersMiddlewareTest extends TestCase
 
         $csp = $response->headers['Content-Security-Policy'];
         self::assertMatchesRegularExpression(
-            "/^default-src 'self'; script-src 'self' 'nonce-[A-Za-z0-9_-]{22}'; style-src 'self' 'nonce-[A-Za-z0-9_-]{22}'\$/",
+            "/^default-src 'self'; script-src 'self' 'nonce-[A-Za-z0-9_-]{22}'; style-src 'self' 'nonce-[A-Za-z0-9_-]{22}'; frame-ancestors 'none'\$/",
             $csp,
         );
     }

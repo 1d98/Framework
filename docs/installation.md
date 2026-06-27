@@ -65,7 +65,7 @@ The canonical minimal example is a 30-line file that wires `Container → Router
 
 > **`composer install` fails on PHP < 8.5.** `composer.json` requires `"php": "^8.5"`.
 > **`.env` changes have no effect.** `Env::load()` runs once. Restart `php -S`.
-> **`/form` shows a 400 in dev.** Visit the page first to set the `csrf_token` cookie.
+> **`/form` shows a 400 in dev.** Visit the page first to set the `__Host-csrf_token` cookie. (0.6.3+: the cookie requires HTTPS to be stored — the dev server is plain HTTP, so the middleware refuses to mint unless `Request::isSecure($trustedProxies)` returns `true`. In dev either set `APP_TRUSTED_PROXIES` to your proxy CIDR (and serve over HTTPS behind it) or exempt the form path via `exemptPaths` in `public/index.php`.)
 
 ## Next
 

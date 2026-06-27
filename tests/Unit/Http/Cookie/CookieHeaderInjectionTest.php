@@ -15,7 +15,7 @@ final class CookieHeaderInjectionTest extends TestCase
     public function testConstructorRejectsCrlfInValue(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cookie value contains CRLF');
+        $this->expectExceptionMessage('Cookie value contains a control character');
 
         new Cookie(name: 'csrf', value: "a\r\nSet-Cookie: pwn=1");
     }
@@ -23,7 +23,7 @@ final class CookieHeaderInjectionTest extends TestCase
     public function testConstructorRejectsCrlfInName(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cookie name contains CRLF');
+        $this->expectExceptionMessage('Cookie name contains a control character');
 
         new Cookie(name: "csrf\r\nX-Evil: pwn", value: 'x');
     }
@@ -31,7 +31,7 @@ final class CookieHeaderInjectionTest extends TestCase
     public function testConstructorRejectsCrlfInPath(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cookie path contains CRLF');
+        $this->expectExceptionMessage('Cookie path contains a control character');
 
         new Cookie(name: 'csrf', value: 'x', path: "/api\r\nX-Evil: pwn");
     }
@@ -39,9 +39,41 @@ final class CookieHeaderInjectionTest extends TestCase
     public function testConstructorRejectsCrlfInDomain(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cookie domain contains CRLF');
+        $this->expectExceptionMessage('Cookie domain contains a control character');
 
         new Cookie(name: 'csrf', value: 'x', domain: "evil.com\r\nX-Evil: pwn");
+    }
+
+    public function testConstructorRejectsNulInName(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Cookie name contains a control character');
+
+        new Cookie(name: "csrf\0X-Evil", value: 'x');
+    }
+
+    public function testConstructorRejectsNulInValue(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Cookie value contains a control character');
+
+        new Cookie(name: 'csrf', value: "value\0trailing-junk");
+    }
+
+    public function testConstructorRejectsNulInPath(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Cookie path contains a control character');
+
+        new Cookie(name: 'csrf', value: 'x', path: "/api\0X-Evil");
+    }
+
+    public function testConstructorRejectsNulInDomain(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Cookie domain contains a control character');
+
+        new Cookie(name: 'csrf', value: 'x', domain: "evil.com\0.evil.tld");
     }
 
     public function testConstructorAcceptsValidNameAndValue(): void
@@ -55,7 +87,7 @@ final class CookieHeaderInjectionTest extends TestCase
     public function testToHeaderValueRejectsCrlfInNameAsDefenseInDepth(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cookie name contains CRLF');
+        $this->expectExceptionMessage('Cookie name contains a control character');
 
         (new Cookie(name: "csrf\r\nX-Evil: pwn", value: 'x'))->toHeaderValue();
     }
@@ -63,7 +95,7 @@ final class CookieHeaderInjectionTest extends TestCase
     public function testToHeaderValueRejectsCrlfInValueAsDefenseInDepth(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cookie value contains CRLF');
+        $this->expectExceptionMessage('Cookie value contains a control character');
 
         (new Cookie(name: 'csrf', value: "a\r\nSet-Cookie: pwn=1"))->toHeaderValue();
     }
@@ -71,7 +103,7 @@ final class CookieHeaderInjectionTest extends TestCase
     public function testToHeaderValueRejectsCrlfInPathAsDefenseInDepth(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cookie path contains CRLF');
+        $this->expectExceptionMessage('Cookie path contains a control character');
 
         (new Cookie(name: 'csrf', value: 'x', path: "/api\r\nX-Evil: pwn"))->toHeaderValue();
     }
@@ -79,7 +111,7 @@ final class CookieHeaderInjectionTest extends TestCase
     public function testToHeaderValueRejectsCrlfInDomainAsDefenseInDepth(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cookie domain contains CRLF');
+        $this->expectExceptionMessage('Cookie domain contains a control character');
 
         (new Cookie(name: 'csrf', value: 'x', domain: "evil.com\r\nX-Evil: pwn"))->toHeaderValue();
     }
@@ -94,7 +126,7 @@ final class CookieHeaderInjectionTest extends TestCase
     public function testConstructorRejectsLfOnlyInName(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cookie name contains CRLF');
+        $this->expectExceptionMessage('Cookie name contains a control character');
 
         new Cookie(name: "csrf\nX-Evil: pwn", value: 'x');
     }
@@ -102,7 +134,7 @@ final class CookieHeaderInjectionTest extends TestCase
     public function testConstructorRejectsCrOnlyInValue(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Cookie value contains CRLF');
+        $this->expectExceptionMessage('Cookie value contains a control character');
 
         new Cookie(name: 'csrf', value: "a\rSet-Cookie: pwn=1");
     }

@@ -12,6 +12,35 @@ final class SignedCookieJar
 {
     public const DEFAULT_ALGORITHM = 'sha256';
 
+    /**
+     * Hash algorithms permitted for HMAC signing. Narrower than
+     * `hash_algos()` on purpose — we want every cookie signed by
+     * this class to be verifiable on any PHP 8.5+ install,
+     * regardless of whether `sodium_*` / `xxhash` / `mhash` / etc.
+     * are compiled in. Removing an algorithm from this list is a
+     * BC break for any in-flight signed cookies; add new ones,
+     * don't reorder.
+     *
+     * @var list<string>
+     */
+    public const array ALLOWED_ALGORITHMS = [
+        'sha256',
+        'sha384',
+        'sha512',
+        'sha3-256',
+        'sha3-384',
+        'sha3-512',
+    ];
+
+    /**
+     * Minimum secret length in bytes. Anything shorter is rejected
+     * at construction so that an operator who copy-pastes a stub
+     * value (e.g. `"change-me"`) fails fast at boot, not at the
+     * first forged-cookie incident. 16 bytes (128 bits) is the
+     * floor for any HMAC use.
+     */
+    public const int MIN_SECRET_BYTES = 16;
+
     public function __construct(
         private readonly string $secret,
         private readonly string $algorithm = self::DEFAULT_ALGORITHM,
@@ -20,8 +49,21 @@ final class SignedCookieJar
             throw new InvalidArgumentException('SignedCookieJar: secret cannot be empty');
         }
 
-        if (!in_array($this->algorithm, hash_algos(), true)) {
-            throw new InvalidArgumentException('SignedCookieJar: unsupported algorithm "' . $this->algorithm . '"');
+        if (strlen($this->secret) < self::MIN_SECRET_BYTES) {
+            throw new InvalidArgumentException(sprintf(
+                'SignedCookieJar: secret is too short (got %d bytes, minimum is %d). '
+                . 'Generate a fresh secret with `php bin/framework app:secret`.',
+                strlen($this->secret),
+                self::MIN_SECRET_BYTES,
+            ));
+        }
+
+        if (!in_array($this->algorithm, self::ALLOWED_ALGORITHMS, true)) {
+            throw new InvalidArgumentException(sprintf(
+                'SignedCookieJar: unsupported algorithm "%s" (allowed: %s)',
+                $this->algorithm,
+                implode(', ', self::ALLOWED_ALGORITHMS),
+            ));
         }
     }
 

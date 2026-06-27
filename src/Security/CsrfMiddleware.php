@@ -14,7 +14,15 @@ use InvalidArgumentException;
 
 final class CsrfMiddleware implements MiddlewareInterface
 {
-    public const COOKIE_NAME = 'csrf_token';
+    /**
+     * The `__Host-` prefix pins the cookie to: Secure, no Domain attribute,
+     * Path=/. RFC 6265bis. Every browser since ~2020 enforces this. It is a
+     * defense-in-depth measure: a sub-domain (e.g. an `images.` subdomain
+     * with a lax cookie policy) cannot shadow the CSRF cookie, and the
+     * Secure flag means the cookie cannot leak over plain HTTP. See
+     * https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-rfc6265bis-03
+     */
+    public const COOKIE_NAME = '__Host-csrf_token';
     public const HEADER_NAME = 'X-CSRF-Token';
     public const FORM_FIELD = '_token';
 
@@ -25,6 +33,17 @@ final class CsrfMiddleware implements MiddlewareInterface
     private readonly LoggerInterface $logger;
 
     /**
+     * Cookie name is `__Host-csrf_token` (RFC 6265bis prefix), which means:
+     *  - the cookie MUST be served with the `Secure` flag,
+     *  - the cookie MUST NOT carry a `Domain` attribute,
+     *  - the cookie `Path` MUST be `/`.
+     * Browsers enforce all three and silently drop the cookie if any rule
+     * is violated. As a consequence the middleware REFUSES to mint the
+     * cookie over a connection it cannot prove is HTTPS — see
+     * {@see self::handleSafe()}. For TLS-terminating deployments, pass
+     * `trustedProxies` so {@see Request::isSecure()} honours
+     * `X-Forwarded-Proto: https`.
+     *
      * @param list<string> $exemptPrefixes Path prefixes exempted from CSRF. Each MUST end with `/` (or be `/`).
      *                                      Example: `['/api/']` matches `/api/users` and `/api/v1/echo`, but NOT `/apiv1`.
      *                                      Passing a string without a trailing `/` throws, to prevent the silent
@@ -43,6 +62,8 @@ final class CsrfMiddleware implements MiddlewareInterface
      *                                      connection. See {@see \Framework\Http\Request\Request::isSecure()}.
      *
      * @throws InvalidArgumentException if any prefix does not end with `/`, or if any entry is not a non-empty string.
+     * @throws \LogicException         when a new cookie must be minted over an
+     *                                      insecure connection (the `__Host-` prefix requires Secure).
      */
     public function __construct(
         private readonly SignedCookieJar $jar,
@@ -117,13 +138,35 @@ final class CsrfMiddleware implements MiddlewareInterface
         $raw = $request->cookie(self::COOKIE_NAME);
 
         if ($raw === null || $raw === '') {
+            // The `__Host-` prefix requires the `Secure` flag, which in turn
+            // requires HTTPS. If the request does not look secure (no TLS, no
+            // trusted proxy claiming `X-Forwarded-Proto: https`), minting a
+            // `__Host-csrf_token` cookie would be silently rejected by every
+            // conforming browser — the user would never receive a CSRF token
+            // and every state-changing request would 400. We fail loud at the
+            // call site instead.
+            if (!$request->isSecure($this->trustedProxies)) {
+                throw new \LogicException(
+                    "CsrfMiddleware: refusing to mint a `__Host-csrf_token` cookie over an insecure connection. "
+                    . "The `__Host-` cookie prefix requires Secure, which requires HTTPS. "
+                    . "Fix one of:\n"
+                    . "  1. Serve the app over HTTPS (production: required).\n"
+                    . "  2. If you are behind a TLS-terminating proxy (load balancer, nginx, Cloudflare), "
+                    . "configure the worker to see HTTPS by passing `trustedProxies` to CsrfMiddleware so "
+                    . "`X-Forwarded-Proto: https` is honoured (see Request::isSecure()).\n"
+                    . "  3. If you really must run CSRF without TLS (dev only), exempt the unsafe paths via "
+                    . "`exemptPrefixes` / `exemptPaths` AND downgrade the cookie name to a non-`__Host-` value "
+                    . "via a subclass — never do this in production."
+                );
+            }
+
             $token = bin2hex(random_bytes(32));
             $response = $this->callNext($request->withCsrfToken($token), $next);
             $cookie = $this->jar->makeCookie(
                 self::COOKIE_NAME,
                 $token,
                 expiresAt: 0,
-                secure: $request->isSecure($this->trustedProxies),
+                secure: true,
             );
 
             return $response->withCookie($cookie);

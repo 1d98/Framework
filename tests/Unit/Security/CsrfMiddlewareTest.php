@@ -11,6 +11,7 @@ use Framework\Logging\LoggerInterface;
 use Framework\Security\CsrfMiddleware;
 use Framework\Security\SignedCookieJar;
 use Framework\Tests\Support\RecordingLogger;
+use LogicException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 
@@ -20,27 +21,50 @@ final class CsrfMiddlewareTest extends TestCase
     private SignedCookieJar $jar;
     private CsrfMiddleware $middleware;
 
+    /** Default REMOTE_ADDR used for the tests; matching the trusted-proxy list. */
+    private const string TRUSTED_REMOTE_ADDR = '127.0.0.1';
+
     protected function setUp(): void
     {
-        $this->jar = new SignedCookieJar('test-secret-key');
-        $this->middleware = new CsrfMiddleware($this->jar);
+        // 32-character secret — comfortably above the 16-byte minimum.
+        $this->jar = new SignedCookieJar('unit-test-secret-32-chars-long');
+        // The middleware is constructed with the trusted-proxies list.
+        // Every test that mints a cookie goes through {@see self::processAsSecure()},
+        // which sets REMOTE_ADDR=127.0.0.1 BEFORE constructing the Request
+        // (so RequestHost::snapshotRemoteAddr() captures the trusted address).
+        // Without the trusted-proxy address, the new `__Host-` prefix would
+        // force every mint test to throw LogicException.
+        $this->middleware = new CsrfMiddleware(
+            $this->jar,
+            exemptPrefixes: [],
+            exemptPaths: [],
+            logger: null,
+            trustedProxies: [self::TRUSTED_REMOTE_ADDR],
+        );
     }
 
     public function testConstants(): void
     {
-        self::assertSame('csrf_token', CsrfMiddleware::COOKIE_NAME);
+        // The cookie name MUST be `__Host-csrf_token` — pinning the cookie
+        // to Secure + Path=/ + no Domain (RFC 6265bis prefix). A bare
+        // `csrf_token` cookie could be shadowed by a subdomain's lax
+        // policy and would silently drop over plain HTTP.
+        self::assertSame('__Host-csrf_token', CsrfMiddleware::COOKIE_NAME);
         self::assertSame('X-CSRF-Token', CsrfMiddleware::HEADER_NAME);
         self::assertSame('_token', CsrfMiddleware::FORM_FIELD);
     }
 
     public function testGetRequestGeneratesTokenAndSetsCookie(): void
     {
-        $request = new Request('GET', '/page');
-
         $capturedRequest = null;
-        $response = $this->middleware->process($request, function (Request $r) use (&$capturedRequest): Response {
-            $capturedRequest = $r;
-            return Response::empty(200);
+        $response = $this->processAsSecure(function () use (&$capturedRequest): Response {
+            return $this->middleware->process(
+                new Request('GET', '/page', headers: ['x-forwarded-proto' => 'https']),
+                function (Request $r) use (&$capturedRequest): Response {
+                    $capturedRequest = $r;
+                    return Response::empty(200);
+                },
+            );
         });
 
         self::assertInstanceOf(Request::class, $capturedRequest);
@@ -51,14 +75,16 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testExemptPathSkipsCsrfEntirelyForUnsafeMethods(): void
     {
-        $middleware = new CsrfMiddleware($this->jar, ['/api/']);
-        $request = new Request('POST', '/api/v1/echo', '', [], '{"x":1}');
+        $middleware = new CsrfMiddleware($this->jar, exemptPrefixes: ['/api/'], trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
 
         $capturedRequest = null;
-        $response = $middleware->process($request, function (Request $r) use (&$capturedRequest): Response {
-            $capturedRequest = $r;
-            return Response::json(['ok' => true]);
-        });
+        $response = $middleware->process(
+            new Request('POST', '/api/v1/echo', '', [], '{"x":1}'),
+            function (Request $r) use (&$capturedRequest): Response {
+                $capturedRequest = $r;
+                return Response::json(['ok' => true]);
+            },
+        );
 
         self::assertSame(200, $response->status);
         self::assertCount(0, $response->cookies(), 'Exempt path must not set a csrf cookie');
@@ -68,17 +94,21 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testExemptPathSkipsCsrfForSafeMethodsAndDoesNotGenerateCookie(): void
     {
-        $middleware = new CsrfMiddleware($this->jar, ['/api/']);
-        $request = new Request('GET', '/api/v1/users');
+        $middleware = new CsrfMiddleware($this->jar, exemptPrefixes: ['/api/'], trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
 
-        $response = $middleware->process($request, static fn(): Response => Response::json(['users' => []]));
+        $response = $this->processAsSecure(function () use ($middleware): Response {
+            return $middleware->process(
+                new Request('GET', '/api/v1/users', headers: ['x-forwarded-proto' => 'https']),
+                static fn(): Response => Response::json(['users' => []]),
+            );
+        });
 
         self::assertCount(0, $response->cookies(), 'Exempt path must not generate a csrf cookie on safe methods either');
     }
 
     public function testNonExemptPathStillEnforcesCsrfWhenExemptListConfigured(): void
     {
-        $middleware = new CsrfMiddleware($this->jar, ['/api/']);
+        $middleware = new CsrfMiddleware($this->jar, exemptPrefixes: ['/api/'], trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
         $request = new Request('POST', '/form/submit', '', [], 'name=Alice');
 
         $this->expectException(BadRequestHttpException::class);
@@ -87,7 +117,7 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testTrailingSlashPrefixMatchesSubpathsButNotLookalikes(): void
     {
-        $middleware = new CsrfMiddleware($this->jar, ['/api/']);
+        $middleware = new CsrfMiddleware($this->jar, exemptPrefixes: ['/api/'], trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
         $next = static fn(): Response => Response::json(['ok' => true]);
 
         self::assertSame(200, $middleware->process(new Request('POST', '/api/users'), $next)->status);
@@ -111,7 +141,7 @@ final class CsrfMiddlewareTest extends TestCase
         $this->expectExceptionMessage("/api");
         $this->expectExceptionMessage("exemptPrefixes");
 
-        new CsrfMiddleware($this->jar, ['/api']);
+        new CsrfMiddleware($this->jar, exemptPrefixes: ['/api']);
     }
 
     public function testEmptyPrefixExemptionIsRejected(): void
@@ -119,7 +149,7 @@ final class CsrfMiddlewareTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage("exemptPrefixes");
 
-        new CsrfMiddleware($this->jar, ['']);
+        new CsrfMiddleware($this->jar, exemptPrefixes: ['']);
     }
 
     public function testEmptyExactPathExemptionIsRejected(): void
@@ -127,12 +157,12 @@ final class CsrfMiddlewareTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage("exemptPaths");
 
-        new CsrfMiddleware($this->jar, [], ['']);
+        new CsrfMiddleware($this->jar, exemptPaths: ['']);
     }
 
     public function testExactPathExemptionMatchesOnlyThatPath(): void
     {
-        $middleware = new CsrfMiddleware($this->jar, [], ['/health']);
+        $middleware = new CsrfMiddleware($this->jar, exemptPaths: ['/health'], trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
         $next = static fn(): Response => Response::json(['ok' => true]);
 
         self::assertSame(200, $middleware->process(new Request('POST', '/health'), $next)->status);
@@ -150,7 +180,7 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testEmptyExemptListAppliesCsrfToAllPaths(): void
     {
-        $middleware = new CsrfMiddleware($this->jar);
+        $middleware = new CsrfMiddleware($this->jar, trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
 
         $token = 'token-64-chars-padding-padding-padding-padding-padding-padding';
         $signed = $this->jar->sign($token);
@@ -174,7 +204,7 @@ final class CsrfMiddlewareTest extends TestCase
     {
         $threw = false;
         try {
-            new CsrfMiddleware($this->jar, ['/']);
+            new CsrfMiddleware($this->jar, exemptPrefixes: ['/']);
         } catch (\InvalidArgumentException $e) {
             $threw = true;
             self::assertStringContainsString("CsrfMiddleware exemptPrefixes cannot be just ['/']", $e->getMessage());
@@ -190,7 +220,7 @@ final class CsrfMiddlewareTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage("CsrfMiddleware exemptPrefixes cannot be just ['/']");
 
-        new CsrfMiddleware($this->jar, ['/'], ['/health']);
+        new CsrfMiddleware($this->jar, exemptPrefixes: ['/'], exemptPaths: ['/health']);
     }
 
     public function testRootPrefixExemptionIsRejectedWithOmittedJarExemptPaths(): void
@@ -198,12 +228,12 @@ final class CsrfMiddlewareTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage("CsrfMiddleware exemptPrefixes cannot be just ['/']");
 
-        new CsrfMiddleware($this->jar, ['/'], []);
+        new CsrfMiddleware($this->jar, exemptPrefixes: ['/'], exemptPaths: []);
     }
 
     public function testNoArgsConstructionIsAllowedAndEnforcesCsrfGlobally(): void
     {
-        $middleware = new CsrfMiddleware($this->jar);
+        $middleware = new CsrfMiddleware($this->jar, trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
 
         $token = 'no-args-token-64-chars-padding-padding-padding-padding-padding-x';
         $signed = $this->jar->sign($token);
@@ -225,7 +255,7 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testSpecificSinglePrefixConstructionIsAllowed(): void
     {
-        $middleware = new CsrfMiddleware($this->jar, ['/api/']);
+        $middleware = new CsrfMiddleware($this->jar, exemptPrefixes: ['/api/'], trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
         $next = static fn(): Response => Response::json(['ok' => true]);
 
         self::assertSame(200, $middleware->process(new Request('POST', '/api/users'), $next)->status);
@@ -235,7 +265,7 @@ final class CsrfMiddlewareTest extends TestCase
     {
         $threw = false;
         try {
-            new CsrfMiddleware($this->jar, ['/']);
+            new CsrfMiddleware($this->jar, exemptPrefixes: ['/']);
         } catch (\InvalidArgumentException $e) {
             $threw = true;
             self::assertStringContainsString("['/']", $e->getMessage());
@@ -246,7 +276,12 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testMixedExactAndPrefixExemptions(): void
     {
-        $middleware = new CsrfMiddleware($this->jar, ['/api/'], ['/health']);
+        $middleware = new CsrfMiddleware(
+            $this->jar,
+            exemptPrefixes: ['/api/'],
+            exemptPaths: ['/health'],
+            trustedProxies: [self::TRUSTED_REMOTE_ADDR],
+        );
         $next = static fn(): Response => Response::json(['ok' => true]);
 
         self::assertSame(200, $middleware->process(new Request('POST', '/health'), $next)->status);
@@ -258,14 +293,16 @@ final class CsrfMiddlewareTest extends TestCase
     {
         $token = 'existing-csrf-token-64-chars-padding-padding-padding-padding-padd';
         $signed = $this->jar->sign($token);
-        $request = new Request('GET', '/form', '', [], '', null, null, null, [
-            CsrfMiddleware::COOKIE_NAME => $signed,
-        ]);
 
         $capturedRequest = null;
-        $response = $this->middleware->process($request, function (Request $r) use (&$capturedRequest): Response {
-            $capturedRequest = $r;
-            return Response::text('ok');
+        $response = $this->processAsSecure(function () use ($signed, &$capturedRequest): Response {
+            return $this->middleware->process(
+                new Request('GET', '/form', headers: ['x-forwarded-proto' => 'https'], cookies: [CsrfMiddleware::COOKIE_NAME => $signed]),
+                function (Request $r) use (&$capturedRequest): Response {
+                    $capturedRequest = $r;
+                    return Response::text('ok');
+                },
+            );
         });
 
         self::assertInstanceOf(Request::class, $capturedRequest);
@@ -275,14 +312,20 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testGetRequestWithInvalidSignatureClearsCookieAndDoesNotMintNew(): void
     {
-        $request = new Request('GET', '/form', '', [], '', null, null, null, [
-            CsrfMiddleware::COOKIE_NAME => 'garbage.invalidsig',
-        ]);
-
         $capturedRequest = null;
-        $response = $this->middleware->process($request, function (Request $r) use (&$capturedRequest): Response {
-            $capturedRequest = $r;
-            return Response::text('ok');
+        $response = $this->processAsSecure(function () use (&$capturedRequest): Response {
+            return $this->middleware->process(
+                new Request(
+                    'GET',
+                    '/form',
+                    headers: ['x-forwarded-proto' => 'https'],
+                    cookies: [CsrfMiddleware::COOKIE_NAME => 'garbage.invalidsig'],
+                ),
+                function (Request $r) use (&$capturedRequest): Response {
+                    $capturedRequest = $r;
+                    return Response::text('ok');
+                },
+            );
         });
 
         self::assertCount(0, $response->cookies(), 'No new csrf cookie must be minted on signature failure (fixation guard)');
@@ -305,14 +348,20 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testGetRequestWithEmptyCookieValueMintsNewToken(): void
     {
-        $request = new Request('GET', '/form', '', [], '', null, null, null, [
-            CsrfMiddleware::COOKIE_NAME => '',
-        ]);
-
         $capturedRequest = null;
-        $response = $this->middleware->process($request, function (Request $r) use (&$capturedRequest): Response {
-            $capturedRequest = $r;
-            return Response::text('ok');
+        $response = $this->processAsSecure(function () use (&$capturedRequest): Response {
+            return $this->middleware->process(
+                new Request(
+                    'GET',
+                    '/form',
+                    headers: ['x-forwarded-proto' => 'https'],
+                    cookies: [CsrfMiddleware::COOKIE_NAME => ''],
+                ),
+                function (Request $r) use (&$capturedRequest): Response {
+                    $capturedRequest = $r;
+                    return Response::text('ok');
+                },
+            );
         });
 
         self::assertInstanceOf(Request::class, $capturedRequest);
@@ -323,12 +372,15 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testGetRequestWithoutAnyCookieMintsNewToken(): void
     {
-        $request = new Request('GET', '/form');
-
         $capturedRequest = null;
-        $response = $this->middleware->process($request, function (Request $r) use (&$capturedRequest): Response {
-            $capturedRequest = $r;
-            return Response::text('ok');
+        $response = $this->processAsSecure(function () use (&$capturedRequest): Response {
+            return $this->middleware->process(
+                new Request('GET', '/form', headers: ['x-forwarded-proto' => 'https']),
+                function (Request $r) use (&$capturedRequest): Response {
+                    $capturedRequest = $r;
+                    return Response::text('ok');
+                },
+            );
         });
 
         self::assertInstanceOf(Request::class, $capturedRequest);
@@ -340,14 +392,21 @@ final class CsrfMiddlewareTest extends TestCase
     {
         $token = 'reused-csrf-token-64-chars-padding-padding-padding-padding-pad';
         $signed = $this->jar->sign($token);
-        $request = new Request('GET', '/form', '', [], '', null, null, null, [
-            CsrfMiddleware::COOKIE_NAME => $signed,
-        ]);
 
         $capturedRequest = null;
-        $response = $this->middleware->process($request, function (Request $r) use (&$capturedRequest): Response {
-            $capturedRequest = $r;
-            return Response::text('ok');
+        $response = $this->processAsSecure(function () use ($signed, &$capturedRequest): Response {
+            return $this->middleware->process(
+                new Request(
+                    'GET',
+                    '/form',
+                    headers: ['x-forwarded-proto' => 'https'],
+                    cookies: [CsrfMiddleware::COOKIE_NAME => $signed],
+                ),
+                function (Request $r) use (&$capturedRequest): Response {
+                    $capturedRequest = $r;
+                    return Response::text('ok');
+                },
+            );
         });
 
         self::assertInstanceOf(Request::class, $capturedRequest);
@@ -357,15 +416,23 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testOptionsPreflightGeneratesCsrfCookieButDoesNotValidate(): void
     {
-        $request = new Request('OPTIONS', '/api/v1/users', '', [
-            'origin' => 'http://localhost:3000',
-            'access-control-request-method' => 'POST',
-        ]);
-
         $capturedRequest = null;
-        $response = $this->middleware->process($request, function (Request $r) use (&$capturedRequest): Response {
-            $capturedRequest = $r;
-            return Response::empty(204);
+        $response = $this->processAsSecure(function () use (&$capturedRequest): Response {
+            return $this->middleware->process(
+                new Request(
+                    'OPTIONS',
+                    '/api/v1/users',
+                    headers: [
+                        'origin' => 'http://localhost:3000',
+                        'access-control-request-method' => 'POST',
+                        'x-forwarded-proto' => 'https',
+                    ],
+                ),
+                function (Request $r) use (&$capturedRequest): Response {
+                    $capturedRequest = $r;
+                    return Response::empty(204);
+                },
+            );
         });
 
         self::assertInstanceOf(Request::class, $capturedRequest);
@@ -596,10 +663,13 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testGetSetsSecureCookieWhenRequestIsSecure(): void
     {
-        $response = $this->withRemoteAddr('127.0.0.1', function (): Response {
-            $middleware = new CsrfMiddleware($this->jar, trustedProxies: ['127.0.0.1']);
-            $request = new Request('GET', '/form', '', ['x-forwarded-proto' => 'https']);
-            return $middleware->process($request, static fn(): Response => Response::text('ok'));
+        $middleware = new CsrfMiddleware($this->jar, trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
+
+        $response = $this->processAsSecure(function () use ($middleware): Response {
+            return $middleware->process(
+                new Request('GET', '/form', headers: ['x-forwarded-proto' => 'https']),
+                static fn(): Response => Response::text('ok'),
+            );
         });
 
         $cookies = $response->cookies();
@@ -609,17 +679,48 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testGetCookieHasNoSecureFlagWhenForwardedProtoComesFromUntrustedIp(): void
     {
-        $response = $this->withRemoteAddr('198.51.100.5', function (): Response {
-            $middleware = new CsrfMiddleware($this->jar, trustedProxies: ['127.0.0.1']);
-            $request = new Request('GET', '/form', '', ['x-forwarded-proto' => 'https']);
-            return $middleware->process($request, static fn(): Response => Response::text('ok'));
-        });
+        $middleware = new CsrfMiddleware($this->jar, trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
 
-        $cookies = $response->cookies();
-        self::assertCount(1, $cookies);
-        self::assertFalse(
-            $cookies[0]->secure,
-            'csrf_token cookie must NOT set Secure when X-Forwarded-Proto comes from an IP outside the trust list',
+        // Remote addr is OUTSIDE the trusted-proxy list — X-Forwarded-Proto
+        // is ignored, the connection is treated as plain HTTP, and the
+        // `__Host-` prefix refuses to mint a cookie. So the test asserts
+        // that minting over an untrusted proxy throws LogicException.
+        $threw = false;
+        try {
+            $this->withRemoteAddr('198.51.100.5', function () use ($middleware): Response {
+                return $middleware->process(
+                    new Request('GET', '/form', headers: ['x-forwarded-proto' => 'https']),
+                    static fn(): Response => Response::text('ok'),
+                );
+            });
+        } catch (LogicException $e) {
+            $threw = true;
+            self::assertStringContainsString('__Host-csrf_token', $e->getMessage());
+            self::assertStringContainsString('insecure connection', $e->getMessage());
+        }
+        self::assertTrue(
+            $threw,
+            'csrf_token cookie must NOT be minted when X-Forwarded-Proto comes from an IP outside the trust list',
+        );
+    }
+
+    public function testMintOverHttpThrowsLogicException(): void
+    {
+        // The `__Host-` cookie prefix requires the `Secure` flag, which
+        // requires HTTPS. When the request is provably plain HTTP (no
+        // X-Forwarded-Proto, no trusted-proxy claim), the middleware
+        // REFUSES to mint a cookie — every conforming browser would
+        // silently drop it anyway, so failing loud at the call site is
+        // the only honest behaviour.
+        $middleware = new CsrfMiddleware($this->jar); // no trustedProxies
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage('__Host-csrf_token');
+        $this->expectExceptionMessage('insecure connection');
+
+        $middleware->process(
+            new Request('GET', '/form'),
+            static fn(): Response => Response::text('ok'),
         );
     }
 
@@ -677,7 +778,7 @@ final class CsrfMiddlewareTest extends TestCase
         $signed = $this->jar->sign($token);
 
         $logger = new RecordingLogger();
-        $middleware = new CsrfMiddleware($this->jar, [], [], $logger);
+        $middleware = new CsrfMiddleware($this->jar, [], [], $logger, [self::TRUSTED_REMOTE_ADDR]);
 
         $request = new Request(
             'POST',
@@ -741,7 +842,7 @@ final class CsrfMiddlewareTest extends TestCase
         $signed = $this->jar->sign($token);
 
         $logger = new RecordingLogger();
-        $middleware = new CsrfMiddleware($this->jar, [], [], $logger);
+        $middleware = new CsrfMiddleware($this->jar, [], [], $logger, [self::TRUSTED_REMOTE_ADDR]);
 
         $request = new Request(
             'POST',
@@ -758,6 +859,21 @@ final class CsrfMiddlewareTest extends TestCase
         $response = $middleware->process($request, static fn(): Response => Response::json(['ok' => true]));
         self::assertSame(200, $response->status);
         self::assertCount(0, $logger->records, 'Form-only must not emit the dual-source notice');
+    }
+
+    /**
+     * Run a closure with REMOTE_ADDR set to a trusted address (127.0.0.1)
+     * so RequestHost::snapshotRemoteAddr() captures it at construction time.
+     * The closure is responsible for constructing the Request and invoking
+     * the middleware — the REMOTE_ADDR snapshot only fires on `new Request(...)`.
+     *
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    private function processAsSecure(callable $fn): mixed
+    {
+        return $this->withRemoteAddr(self::TRUSTED_REMOTE_ADDR, $fn);
     }
 
     /**

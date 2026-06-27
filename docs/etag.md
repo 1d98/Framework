@@ -45,6 +45,17 @@ If-None-Match: "a1b2c3d4e5f6..."
 
 Strong (default) is byte-exact: two `ETag: "abc"` values match only if the bodies are byte-identical. Weak (`W/"abc"`) is semantic-equivalent: two responses that render the same HTML but with different whitespace match. Use strong by default; switch to weak only when the response is dynamic and you cannot guarantee byte stability across renders.
 
+## Algorithm allowlist
+
+`EtagPolicy` ([`src/Http/Middleware/EtagPolicy.php:44`](../../src/Http/Middleware/EtagPolicy.php)) restricts `algorithm` to a fixed `ALLOWED_ALGORITHMS = ['xxh128', 'sha256']` list. Passing any other `hash_algos()` value — `md5`, `sha1`, `crc32`, `fnv1a64`, etc. — throws `InvalidArgumentException` at boot. The two remaining algorithms are stable across PHP 8.5 versions and platforms (xxHash is shipped with PHP 8.1+ as a first-class `hash_algos()` entry).
+
+Pick on cost vs collision-sensitivity:
+
+| Algorithm | Speed | When to use |
+|---|---|---|
+| `xxh128` (default) | ~12 GB/s | Cache validation. 128 bits is well past the collision floor for HTTP cache validation. |
+| `sha256` | ~400 MB/s | Idempotency tokens and other use cases where the etag is also used as a content-addressed handle. Slower but cryptographically strong. |
+
 ## Pipeline ordering
 
 When the `CompressionMiddleware` is also active, it MUST run BEFORE `EtagMiddleware` so the etag reflects the on-the-wire body (gzipped), not the original. The same applies to any other body-transforming middleware (a future `HtmlMinifyMiddleware`, etc.).

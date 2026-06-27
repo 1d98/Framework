@@ -117,7 +117,7 @@ final class HttpEndToEndTest extends LiveHttpTestCase
         self::assertSame('strict-origin-when-cross-origin', $response['headers']['Referrer-Policy'] ?? null);
         $csp = $response['headers']['Content-Security-Policy'] ?? '';
         self::assertMatchesRegularExpression(
-            "/^default-src 'self'; script-src 'self' 'nonce-[A-Za-z0-9_-]{22}'; style-src 'self' 'nonce-[A-Za-z0-9_-]{22}'\$/",
+            "/^default-src 'self'; script-src 'self' 'nonce-[A-Za-z0-9_-]{22}'; style-src 'self' 'nonce-[A-Za-z0-9_-]{22}'; frame-ancestors 'none'\$/",
             $csp,
         );
         self::assertSame('max-age=31536000; includeSubDomains', $response['headers']['Strict-Transport-Security'] ?? null);
@@ -157,7 +157,9 @@ final class HttpEndToEndTest extends LiveHttpTestCase
         self::assertStringContainsString('name="_token"', $response['body'], 'Form must contain a _token field');
 
         $setCookie = $response['headers']['Set-Cookie'] ?? '';
-        self::assertStringContainsString('csrf_token=', $setCookie, 'First visit to /form must set csrf_token cookie');
+        // The CSRF cookie MUST carry the `__Host-` prefix (RFC 6265bis):
+        // pinning the cookie to Secure + Path=/ + no Domain attribute.
+        self::assertStringContainsString('__Host-csrf_token=', $setCookie, 'First visit to /form must set __Host-csrf_token cookie');
         self::assertStringContainsString('HttpOnly', $setCookie);
     }
 
@@ -170,14 +172,14 @@ final class HttpEndToEndTest extends LiveHttpTestCase
         self::assertArrayHasKey(1, $tokenMatch, 'Form HTML must contain a _token field with value');
         $token = $tokenMatch[1];
 
-        preg_match('/Set-Cookie:\s*csrf_token=([^;\r\n]+)/i', $formResponse['raw'], $cookieMatch);
-        self::assertArrayHasKey(1, $cookieMatch, 'First GET /form must set csrf_token cookie. Raw: ' . $formResponse['raw']);
+        preg_match('/Set-Cookie:\s*__Host-csrf_token=([^;\r\n]+)/i', $formResponse['raw'], $cookieMatch);
+        self::assertArrayHasKey(1, $cookieMatch, 'First GET /form must set __Host-csrf_token cookie. Raw: ' . $formResponse['raw']);
         $cookieValue = trim($cookieMatch[1]);
 
         $postResponse = $this->liveRaw('POST', '/submit', [
             'Content-Type: application/x-www-form-urlencoded',
             'X-CSRF-Token: ' . $token,
-            'Cookie: csrf_token=' . $cookieValue,
+            'Cookie: __Host-csrf_token=' . $cookieValue,
         ], '_token=' . urlencode($token) . '&name=Alice');
 
         self::assertSame(200, $postResponse['code'], 'POST /submit with valid CSRF must succeed. Body: ' . $postResponse['body']);

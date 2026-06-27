@@ -52,6 +52,12 @@ final class StreamLogger implements LoggerInterface
             if ($opened === false) {
                 throw new RuntimeException("Cannot open stream: {$stream}");
             }
+            // Defense in depth: tighten permissions on the log file we just
+            // opened so that on shared hosts / mis-set umasks the file is not
+            // world-readable. Errors are intentionally suppressed — FAT,
+            // FUSE mounts, and Windows refuse chmod and we don't want to
+            // turn a logger-into-disk failure into a request-time crash.
+            @chmod($stream, 0o600);
             $stream = $opened;
             $ownsStream = true;
         }

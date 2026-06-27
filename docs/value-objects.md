@@ -36,7 +36,7 @@ $request->body;         // raw body string
 $request->json;         // mixed, set by JsonBodyParser
 $request->form;         // ?array, set by FormBodyParser / MultipartBodyParser
 $request->files;        // ?array<UploadedFile|list<UploadedFile>>
-$request->cookies;      // ['csrf_token' => '...']
+$request->cookies;      // ['__Host-csrf_token' => '...']
 $request->csrfToken;    // ?string, set by CsrfMiddleware
 $request->id;           // 'abcd1234...' — X-Request-Id or random
 $request->attributes;   // request-scoped bag for middleware
@@ -139,7 +139,9 @@ $cookie = $jar->makeCookie('session', 'alice', expiresAt: time() + 3600);
 $response = $response->withCookie($cookie);
 ```
 
-`SignedCookieJar::sign()` produces `value.signature` (base64url HMAC). The reader path is `jar->read($request, 'session')` — returns the original payload or `null` if the signature does not match. The CSRF middleware uses this internally for the `csrf_token` cookie.
+`SignedCookieJar::sign()` produces `value.signature` (base64url HMAC). The reader path is `jar->read($request, 'session')` — returns the original payload or `null` if the signature does not match. The CSRF middleware uses this internally for the `__Host-csrf_token` cookie (since 0.6.3; previously `csrf_token`).
+
+> **Since 0.6.3** `SignedCookieJar` rejects any algorithm not in `ALLOWED_ALGORITHMS = ['sha256', 'sha384', 'sha512', 'sha3-256', 'sha3-384', 'sha3-512']` and refuses secrets shorter than `MIN_SECRET_BYTES = 16`. See the [0.6.3 hardening section in the security chapter](security.md#0-6-3-hardening) for the full list of changes.
 
 ## Common pitfalls
 

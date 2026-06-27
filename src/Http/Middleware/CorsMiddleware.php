@@ -17,7 +17,7 @@ final class CorsMiddleware implements MiddlewareInterface
      * @param list<string> $headers       Default: ['Content-Type','Authorization','X-CSRF-Token']
      * @param list<string> $exposeHeaders Default: []
      * @param bool         $credentials   Default: false
-     * @param int          $maxAge        Default: 86400 (24h, in seconds)
+     * @param int          $maxAge        Default: 300 (5 minutes, in seconds)
      */
     public function __construct(
         private readonly array $origins,
@@ -25,7 +25,7 @@ final class CorsMiddleware implements MiddlewareInterface
         private readonly array $headers = ['Content-Type', 'Authorization', 'X-CSRF-Token'],
         private readonly array $exposeHeaders = [],
         private readonly bool $credentials = false,
-        private readonly int $maxAge = 86400,
+        private readonly int $maxAge = 300,
     ) {
         if (in_array('*', $this->origins, true) && $this->credentials === true) {
             throw new InvalidArgumentException('CORS: cannot use "*" origin with credentials=true (CORS spec violation)');

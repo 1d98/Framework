@@ -13,7 +13,7 @@ final class SecurityHeadersMiddleware implements MiddlewareInterface
         'X-Content-Type-Options' => 'nosniff',
         'X-Frame-Options' => 'DENY',
         'Referrer-Policy' => 'strict-origin-when-cross-origin',
-        'Content-Security-Policy' => "default-src 'self'",
+        'Content-Security-Policy' => "default-src 'self'; frame-ancestors 'none'",
     ];
 
     public const ATTR_CSP_NONCE = 'csp_nonce';
@@ -63,7 +63,7 @@ final class SecurityHeadersMiddleware implements MiddlewareInterface
             $effective['Content-Security-Policy'] = $this->csp;
         } elseif (!$cspOverriddenByUser) {
             $effective['Content-Security-Policy'] = sprintf(
-                "default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'nonce-%s'",
+                "default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'nonce-%s'; frame-ancestors 'none'",
                 $nonce,
                 $nonce,
             );

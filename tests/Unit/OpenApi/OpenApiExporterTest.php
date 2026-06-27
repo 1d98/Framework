@@ -207,6 +207,141 @@ final class OpenApiExporterTest extends TestCase
         self::assertSame(['/aaa', '/mmm', '/zzz'], array_keys($paths));
     }
 
+    public function testEmptyExcludePatternsKeepsAllRoutes(): void
+    {
+        // No exclusions at all → every registered route shows up in the
+        // document. This is the regression-guard for the default config:
+        // someone wiring up an exporter for the first time should see
+        // their full route table, not a surprise filtered view.
+        $router = new Router();
+        $router->get('/users', static fn(Request $r, array $p): Response => Response::empty(200));
+        $router->get('/_internal/health', static fn(Request $r, array $p): Response => Response::empty(200));
+        $exporter = new OpenApiExporter(title: 'T', version: '1.0.0');
+
+        $doc = $exporter->build($router);
+
+        $paths = $this->arrayValue($this->payload($doc), 'paths');
+        self::assertArrayHasKey('/users', $paths);
+        self::assertArrayHasKey('/_internal/health', $paths);
+    }
+
+    public function testExcludesByLiteralPrefix(): void
+    {
+        // The `/_internal/` prefix is the canonical "hide the operator
+        // surface from the public spec" pattern. Anything that starts
+        // with `/_internal/` (or equals it exactly) must be dropped.
+        $router = new Router();
+        $router->get('/users', static fn(Request $r, array $p): Response => Response::empty(200));
+        $router->get('/_internal/health', static fn(Request $r, array $p): Response => Response::empty(200));
+        $router->get('/_internal/metrics', static fn(Request $r, array $p): Response => Response::empty(200));
+
+        $exporter = new OpenApiExporter(
+            title: 'T',
+            version: '1.0.0',
+            excludePatterns: ['/_internal/'],
+        );
+
+        $doc = $exporter->build($router);
+
+        $paths = $this->arrayValue($this->payload($doc), 'paths');
+        self::assertArrayHasKey('/users', $paths);
+        self::assertArrayNotHasKey('/_internal/health', $paths);
+        self::assertArrayNotHasKey('/_internal/metrics', $paths);
+    }
+
+    public function testExcludesByRegex(): void
+    {
+        // Delimiter-wrapped regex syntax: `'#^/admin/#'`. Anything that
+        // starts and ends with the same delimiter character is treated
+        // as a PCRE pattern. This is the escape hatch when literal
+        // prefixes are not precise enough.
+        $router = new Router();
+        $router->get('/users', static fn(Request $r, array $p): Response => Response::empty(200));
+        $router->get('/admin/dashboard', static fn(Request $r, array $p): Response => Response::empty(200));
+        $router->get('/admin/users', static fn(Request $r, array $p): Response => Response::empty(200));
+
+        $exporter = new OpenApiExporter(
+            title: 'T',
+            version: '1.0.0',
+            excludePatterns: ['#^/admin/#'],
+        );
+
+        $doc = $exporter->build($router);
+
+        $paths = $this->arrayValue($this->payload($doc), 'paths');
+        self::assertArrayHasKey('/users', $paths);
+        self::assertArrayNotHasKey('/admin/dashboard', $paths);
+        self::assertArrayNotHasKey('/admin/users', $paths);
+    }
+
+    public function testWithExcludePatternsReturnsNewInstanceWithMergedList(): void
+    {
+        // `withExcludePatterns()` is the immutable builder pattern:
+        // the original exporter MUST stay untouched (immutability), and
+        // the returned instance must have its exclusion list MERGED with
+        // the additional patterns — existing patterns are preserved,
+        // new patterns are appended.
+        $router = new Router();
+        $router->get('/users', static fn(Request $r, array $p): Response => Response::empty(200));
+        $router->get('/_internal/health', static fn(Request $r, array $p): Response => Response::empty(200));
+        $router->get('/admin/dashboard', static fn(Request $r, array $p): Response => Response::empty(200));
+
+        $base = new OpenApiExporter(
+            title: 'T',
+            version: '1.0.0',
+            excludePatterns: ['/_internal/'],
+        );
+
+        // Sanity: the original exporter's pattern is in effect on the base.
+        $baseDoc = $base->build($router);
+        $basePaths = $this->arrayValue($this->payload($baseDoc), 'paths');
+        self::assertArrayNotHasKey('/_internal/health', $basePaths);
+        self::assertArrayHasKey('/admin/dashboard', $basePaths);
+
+        $extended = $base->withExcludePatterns(['#^/admin/#']);
+        self::assertNotSame($base, $extended, 'withExcludePatterns must return a new instance');
+
+        $extendedDoc = $extended->build($router);
+        $extendedPaths = $this->arrayValue($this->payload($extendedDoc), 'paths');
+        self::assertArrayNotHasKey('/_internal/health', $extendedPaths);
+        self::assertArrayNotHasKey('/admin/dashboard', $extendedPaths);
+        self::assertArrayHasKey('/users', $extendedPaths);
+
+        // Original exporter MUST still be untouched: re-running it
+        // produces the same document as the first build, with only the
+        // `/_internal/` exclusion.
+        $baseDocAgain = $base->build($router);
+        $basePathsAgain = $this->arrayValue($this->payload($baseDocAgain), 'paths');
+        self::assertArrayHasKey('/admin/dashboard', $basePathsAgain, 'base exporter must remain immutable');
+        self::assertArrayNotHasKey('/_internal/health', $basePathsAgain);
+    }
+
+    public function testExcludesExactMatchWithoutTrailingSlash(): void
+    {
+        // `/_internal` (no trailing slash) excludes:
+        //   - the exact path `/_internal` (`$path === $pattern` branch), and
+        //   - every sub-path under `/_internal/` (the prefix-with-slash
+        //     branch: `str_starts_with($path, '/_internal/')`).
+        // It does NOT exclude the lookalike `/internal` (which does not
+        // start with `/_internal/`).
+        $router = new Router();
+        $router->get('/_internal', static fn(Request $r, array $p): Response => Response::empty(200));
+        $router->get('/_internal/health', static fn(Request $r, array $p): Response => Response::empty(200));
+        $router->get('/internal', static fn(Request $r, array $p): Response => Response::empty(200));
+
+        $exporter = new OpenApiExporter(
+            title: 'T',
+            version: '1.0.0',
+            excludePatterns: ['/_internal'],
+        );
+
+        $doc = $exporter->build($router);
+        $paths = $this->arrayValue($this->payload($doc), 'paths');
+        self::assertArrayNotHasKey('/_internal', $paths, 'exact path must be excluded');
+        self::assertArrayNotHasKey('/_internal/health', $paths, 'sub-path must be excluded');
+        self::assertArrayHasKey('/internal', $paths, 'lookalike /internal must NOT be excluded');
+    }
+
     /**
      * @return array<string, mixed>
      */

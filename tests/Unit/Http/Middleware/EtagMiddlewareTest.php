@@ -219,4 +219,24 @@ final class EtagMiddlewareTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         new EtagPolicy(algorithm: 'no-such-hash');
     }
+
+    public function testRejectsMd5(): void
+    {
+        // md5 has been broken since 2004 — we explicitly reject it from
+        // the policy allowlist so an etag value cannot accidentally be
+        // derived from a hash with known collision attacks.
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('md5');
+        new EtagPolicy(algorithm: 'md5');
+    }
+
+    public function testRejectsSha1(): void
+    {
+        // sha1 has documented collision attacks (SHAttered, 2017). The
+        // etag allowlist is intentionally narrower than `hash_algos()`
+        // and excludes sha1.
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('sha1');
+        new EtagPolicy(algorithm: 'sha1');
+    }
 }

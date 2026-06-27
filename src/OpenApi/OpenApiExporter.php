@@ -48,6 +48,12 @@ final class OpenApiExporter
      *     the originating {@see Route}; returns the (possibly
      *     augmented) operation array. Returning the input array
      *     unchanged is the "no change" sentinel.
+     * @param list<string> $excludePatterns Routes whose path matches any
+     *     entry are dropped from the generated document. Each entry is
+     *     either a literal prefix (e.g. `'/_internal/'`) or a delimiter-
+     *     wrapped regex (e.g. `'#/^/admin/#'`). Useful for hiding
+     *     health-check endpoints, internal probes, or admin paths from
+     *     the public spec.
      */
     public function __construct(
         private readonly string $title,
@@ -55,7 +61,27 @@ final class OpenApiExporter
         private readonly string $description = '',
         private readonly array $pathParamDescriptions = [],
         private readonly ?\Closure $operationDecorator = null,
+        private readonly array $excludePatterns = [],
     ) {
+    }
+
+    /**
+     * Return a copy of this exporter with `$additionalPatterns` appended
+     * to the existing exclusion list. Existing patterns are preserved;
+     * duplicates are not de-duplicated (cheap, predictable).
+     *
+     * @param list<string> $additionalPatterns
+     */
+    public function withExcludePatterns(array $additionalPatterns): self
+    {
+        return new self(
+            $this->title,
+            $this->version,
+            $this->description,
+            $this->pathParamDescriptions,
+            $this->operationDecorator,
+            [...$this->excludePatterns, ...$additionalPatterns],
+        );
     }
 
     /**
@@ -68,6 +94,9 @@ final class OpenApiExporter
         $paths = [];
 
         foreach ($router->getRoutes() as $route) {
+            if ($this->isExcluded($route->path)) {
+                continue;
+            }
             $uriPath = $this->convertPath($route->path);
             $params = $this->extractParams($route->path);
 
@@ -178,5 +207,55 @@ final class OpenApiExporter
     private function pathConstraints(Route $route): array
     {
         return $route->getConstraints();
+    }
+
+    /**
+     * Does `$path` match any exclusion pattern? A pattern is either:
+     *   - a literal prefix (e.g. `/_internal/`) — matches if the route
+     *     path is exactly that string OR starts with `<pattern>/`. So
+     *     `/_internal/` matches `/health` only if `/health === '/_internal/'`
+     *     OR `/health` starts with `/_internal//`, which is never the case
+     *     for sane inputs — use prefix matching for hierarchical paths;
+     *   - a delimiter-wrapped regex (e.g. `#^/admin/#`). Anything that
+     *     starts and ends with the same character from
+     *     `['/', '#', '~', '|', '!', '%', '@']` is treated as a regex
+     *     and run through `preg_match` (errors suppressed).
+     */
+    private function isExcluded(string $path): bool
+    {
+        foreach ($this->excludePatterns as $pattern) {
+            if ($this->looksLikeRegex($pattern)) {
+                if (@preg_match($pattern, $path) === 1) {
+                    return true;
+                }
+                continue;
+            }
+
+            $prefix = rtrim($pattern, '/');
+            if ($path === $pattern || str_starts_with($path, $prefix . '/')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Heuristic: a string looks like a PCRE pattern when it is at least
+     * two characters long and the first and last characters are the same
+     * and belong to the set of common delimiters. False positives are
+     * possible (e.g. a route named exactly `//`) but in practice route
+     * names are HTTP paths starting with `/`, and `//` matching itself
+     * is benign.
+     */
+    private function looksLikeRegex(string $pattern): bool
+    {
+        $delimiters = ['/', '#', '~', '|', '!', '%', '@'];
+        $len = strlen($pattern);
+        if ($len < 2) {
+            return false;
+        }
+        $first = $pattern[0];
+        $last = $pattern[$len - 1];
+        return $first === $last && in_array($first, $delimiters, true);
     }
 }

@@ -86,6 +86,11 @@ final class HttpKernelErrorHandlingTest extends TestCase
             throw new RuntimeException('database connection lost');
         });
 
+        // HttpKernel builds a default `RequestErrorRenderer($debug)` with
+        // `redactTrace: true` (the safe default). So even when the kernel
+        // is in debug mode, the trace is suppressed in the response body —
+        // operators must wire a `RequestErrorRenderer(debug: true, redactTrace: false)`
+        // through the kernel's optional ctor arg to opt in.
         $kernel = new HttpKernel($router, null, null, null, true);
         $response = $kernel->handle(new Request('GET', '/crash'));
 
@@ -93,6 +98,33 @@ final class HttpKernelErrorHandlingTest extends TestCase
         $body = json_decode($response->body, true);
         self::assertIsArray($body);
         self::assertSame(500, $body['status']);
+        self::assertSame('Internal Server Error', $body['detail']);
+        self::assertArrayNotHasKey('trace', $body);
+    }
+
+    public function testDebugModeWithExplicitRedactFalseExposesTrace(): void
+    {
+        // Opt-in to trace leakage: the kernel is in debug mode AND the
+        // explicitly-supplied renderer has `redactTrace: false`. This is
+        // the dev/staging shape that surfaces file paths and class names.
+        $router = new Router();
+        $router->get('/crash', static function (): Response {
+            throw new RuntimeException('database connection lost');
+        });
+
+        $kernel = new HttpKernel(
+            $router,
+            null,
+            null,
+            null,
+            true,
+            new \Framework\Http\RequestErrorRenderer(debug: true, redactTrace: false),
+        );
+        $response = $kernel->handle(new Request('GET', '/crash'));
+
+        self::assertSame(500, $response->status);
+        $body = json_decode($response->body, true);
+        self::assertIsArray($body);
         self::assertSame('database connection lost', $body['detail']);
         self::assertArrayHasKey('trace', $body);
         self::assertIsArray($body['trace']);

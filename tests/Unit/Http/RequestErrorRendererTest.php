@@ -82,7 +82,31 @@ final class RequestErrorRendererTest extends TestCase
 
     public function testRendersGenericThrowableWithMessageAndTraceInDebug(): void
     {
+        // `debug: true` alone no longer leaks the trace — `redactTrace`
+        // defaults to `true`, which forces `debug` to `false` for the
+        // ProblemDetails payload. Operators must explicitly opt in to
+        // stack-trace leakage by passing `redactTrace: false`. This is
+        // the safer default: a forgotten `debug=true` in production
+        // must NOT leak file paths and class names to the public.
         $renderer = new RequestErrorRenderer(debug: true);
+        $request = new Request('GET', '/crash');
+
+        $response = $renderer->render(new RuntimeException('database connection lost'), $request);
+
+        self::assertSame(500, $response->status);
+        $body = json_decode($response->body, true);
+        self::assertIsArray($body);
+        self::assertSame('Internal Server Error', $body['detail'], 'debug=true must be overridden by redactTrace=true');
+        self::assertArrayNotHasKey('trace', $body, 'redactTrace=true (default) must strip the trace field');
+    }
+
+    public function testConstructorWithRedactTraceFalseLeaksTrace(): void
+    {
+        // Explicit opt-in: an operator in a controlled dev / staging
+        // environment wants the trace to surface in the response. They
+        // must pass `redactTrace: false` AND `debug: true`. Both are
+        // required — `redactTrace: false` alone does NOT leak the trace.
+        $renderer = new RequestErrorRenderer(debug: true, redactTrace: false);
         $request = new Request('GET', '/crash');
 
         $response = $renderer->render(new RuntimeException('database connection lost'), $request);
@@ -94,6 +118,24 @@ final class RequestErrorRendererTest extends TestCase
         self::assertArrayHasKey('trace', $body);
         self::assertIsArray($body['trace']);
         self::assertNotEmpty($body['trace']);
+    }
+
+    public function testRedactTraceFalseAloneDoesNotLeakTrace(): void
+    {
+        // `redactTrace: false` only DOWNGRADES the safety lock — it
+        // does not, by itself, turn on trace leakage. The operator
+        // must also pass `debug: true`. This prevents an "innocent"
+        // copy-paste of `redactTrace: false` in a non-debug production
+        // build from accidentally exposing traces.
+        $renderer = new RequestErrorRenderer(debug: false, redactTrace: false);
+        $request = new Request('GET', '/crash');
+
+        $response = $renderer->render(new RuntimeException('database connection lost'), $request);
+
+        $body = json_decode($response->body, true);
+        self::assertIsArray($body);
+        self::assertArrayNotHasKey('trace', $body);
+        self::assertSame('Internal Server Error', $body['detail']);
     }
 
     public function testRendersHttpExceptionWithoutTraceInDebug(): void

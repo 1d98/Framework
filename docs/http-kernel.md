@@ -42,6 +42,20 @@ The kernel ships two renderers. Pick one based on whether you need request/trace
 
 The minimal renderer. Emits an `application/problem+json` body with `type`, `title`, `status`, `detail`, `instance` and (for 4xx validation) `errors[]`. The response gets `X-Request-Id` set from `Request::$id`. No trace context.
 
+Since 0.6.3, the ctor takes a second optional argument `bool $redactTrace = true` ([`src/Http/RequestErrorRenderer.php:29`](../../src/Http/RequestErrorRenderer.php)). When `redactTrace: true` (the default), the renderer internally forces `debug` to `false` for the rendering call — stack frames NEVER appear in the response body, even if `debug: true` was passed:
+
+```php
+use Framework\Http\RequestErrorRenderer;
+
+// Production — safe default; debug=false, no frames leaked
+$renderer = new RequestErrorRenderer(debug: false);
+
+// Development — restore the old behaviour, see frames in the 500 body
+$renderer = new RequestErrorRenderer(debug: true, redactTrace: false);
+```
+
+The kernel auto-builds a `RequestErrorRenderer(debug: (bool) getenv('APP_DEBUG'))` — that single-arg form picks up the new `redactTrace: true` safe default. To see frames in development, build your own renderer and pass it via the `$errorRenderer` ctor arg on `HttpKernel`. See the [0.6.3 hardening section in the security chapter](security.md#requesterrorrenderer-defaults-to-redacttrace-true) for the migration.
+
 ### `StructuredErrorRenderer` (recommended for production)
 
 Adds three orthogonal knobs to the legacy renderer:
@@ -150,7 +164,7 @@ Outer → inner. Why this order: **Compression** outer so 500s still get gzipped
 | Middleware | Purpose | Notable options |
 |---|---|---|
 | `CompressionMiddleware` | gzip responses ≥ 1 KiB | `$threshold`, `$level`, `$compressibleTypes` |
-| `CorsMiddleware` | RFC-aware CORS with `Vary` header | `$origins`, `$methods`, `$headers`, `$credentials`, `$maxAge` |
+| `CorsMiddleware` | RFC-aware CORS with `Vary` header | `$origins`, `$methods`, `$headers`, `$credentials`, `$maxAge` (default 300 s since 0.6.3; was 86400) |
 | `FormBodyParser` | parses `application/x-www-form-urlencoded` | — |
 | `HttpsRedirectMiddleware` | 301 → https in prod | `$statusCode` (301/308), `$trustedHosts` (required), `$trustedProxies` |
 | `JsonBodyParser` | parses `application/json` | — |

@@ -79,9 +79,9 @@ final readonly class Cookie
 
     private static function assertNoCrlf(string $field, string $value): void
     {
-        if (preg_match('/[\r\n]/', $value) === 1) {
+        if (preg_match('/[\r\n\0]/', $value) === 1) {
             throw new InvalidArgumentException(
-                "Cookie {$field} contains CRLF: {$value}",
+                "Cookie {$field} contains a control character (CR / LF / NUL): {$value}",
             );
         }
     }

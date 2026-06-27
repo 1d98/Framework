@@ -258,4 +258,81 @@ final class StreamLoggerHardeningTest extends TestCase
         self::assertStringContainsString('"unencodable":"array"', $contents);
         self::assertStringNotContainsString('"name":"a"', $contents);
     }
+
+    public function testConstructorWithPathApplies0600(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'log_perm_');
+        self::assertIsString($path);
+
+        try {
+            $logger = new StreamLogger($path);
+
+            self::assertFileExists($path);
+
+            // chmod on Windows is best-effort; on POSIX it must succeed and
+            // produce exactly mode 0600 (owner read/write, no group/other
+            // permissions). We assert the POSIX path strictly and skip on
+            // Windows where chmod semantics differ.
+            if (DIRECTORY_SEPARATOR === '/') {
+                $perms = fileperms($path);
+                self::assertIsInt($perms);
+                $mode = $perms & 0o777;
+                self::assertSame(
+                    0o600,
+                    $mode,
+                    sprintf('StreamLogger must chmod path-opened log files to 0600 (got 0%o)', $mode),
+                );
+            }
+
+            // The logger must remain usable after chmod tightening.
+            $logger->info('after-chmod');
+            self::assertStringContainsString('INFO after-chmod', file_get_contents($path) ?: '');
+        } finally {
+            if (is_file($path)) {
+                @chmod($path, 0o600);
+                unlink($path);
+            }
+        }
+    }
+
+    public function testConstructorWithResourceDoesNotChangePermissions(): void
+    {
+        // Pre-opened stream resource: the constructor MUST NOT call
+        // chmod on the underlying path — the caller already owns the
+        // stream and changing permissions on a fd that the user opened
+        // (e.g. from an existing file handle with different ACLs) would
+        // be surprising at best. Use a temp file the test owns, pre-open
+        // it, then assert that the perms are unchanged after construction.
+        $path = tempnam(sys_get_temp_dir(), 'log_res_');
+        self::assertIsString($path);
+        @chmod($path, 0o644);
+
+        $stream = fopen($path, 'a');
+        self::assertIsResource($stream);
+
+        try {
+            $logger = new StreamLogger($stream);
+
+            if (DIRECTORY_SEPARATOR === '/') {
+                $perms = fileperms($path);
+                self::assertIsInt($perms);
+                $mode = $perms & 0o777;
+                self::assertSame(
+                    0o644,
+                    $mode,
+                    'StreamLogger must NOT chmod a caller-provided stream resource',
+                );
+            }
+
+            $logger->info('via-resource');
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+            if (is_file($path)) {
+                @chmod($path, 0o600);
+                unlink($path);
+            }
+        }
+    }
 }

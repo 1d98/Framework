@@ -210,8 +210,12 @@ final class MultipartBodyParserSanitizationTest extends TestCase
         });
     }
 
-    public function testMultipartFilenameLongerThan255IsTruncated(): void
+    public function testMultipartFilenameLongerThan200IsTruncated(): void
     {
+        // Filenames are sanitized by {@see FilenameSanitizer}, which
+        // truncates to {@see FilenameSanitizer::MAX_FILENAME_BYTES}
+        // (200 bytes). The old 255-byte cap is gone — keeping it would
+        // make the sanitized name reject on every supported filesystem.
         $boundary = 'LONG';
         $longName = str_repeat('a', 500);
         $body = "--{$boundary}\r\n"
@@ -231,16 +235,19 @@ final class MultipartBodyParserSanitizationTest extends TestCase
             $files = $r->files();
             self::assertIsArray($files);
             self::assertInstanceOf(UploadedFile::class, $files['file']);
-            self::assertSame(255, strlen($files['file']->name));
-            self::assertSame(str_repeat('a', 255), $files['file']->name);
+            self::assertSame(\Framework\Http\Multipart\FilenameSanitizer::MAX_FILENAME_BYTES, strlen($files['file']->name));
+            self::assertSame(str_repeat('a', \Framework\Http\Multipart\FilenameSanitizer::MAX_FILENAME_BYTES), $files['file']->name);
             return Response::json(['ok' => true]);
         });
     }
 
     public function testMultipartFilenameAtBoundaryIsKept(): void
     {
+        // Exactly MAX_FILENAME_BYTES bytes is the upper bound that
+        // survives sanitization without truncation. Above this length
+        // the sanitizer truncates; at or below it the name is kept as-is.
         $boundary = 'EXACT';
-        $exactName = str_repeat('b', 255);
+        $exactName = str_repeat('b', \Framework\Http\Multipart\FilenameSanitizer::MAX_FILENAME_BYTES);
         $body = "--{$boundary}\r\n"
             . "Content-Disposition: form-data; name=\"file\"; filename=\"{$exactName}\"\r\n"
             . "Content-Type: text/plain\r\n\r\npayload\r\n"

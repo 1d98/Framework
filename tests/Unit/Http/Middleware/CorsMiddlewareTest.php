@@ -78,7 +78,7 @@ final class CorsMiddlewareTest extends TestCase
         self::assertSame('http://localhost:3000', $response->headers['Access-Control-Allow-Origin']);
         self::assertSame('GET, POST, PUT, PATCH, DELETE, OPTIONS', $response->headers['Access-Control-Allow-Methods']);
         self::assertSame('Content-Type, Authorization, X-CSRF-Token', $response->headers['Access-Control-Allow-Headers']);
-        self::assertSame('86400', $response->headers['Access-Control-Max-Age']);
+        self::assertSame('300', $response->headers['Access-Control-Max-Age']);
         self::assertSame('Origin, Access-Control-Request-Method, Access-Control-Request-Headers', $response->headers['Vary']);
         self::assertSame('true', $response->headers['Access-Control-Allow-Credentials']);
     }

@@ -21,7 +21,7 @@ The full set is documented in [`.env.example`](../../.env.example):
 | Variable | Default | Purpose |
 |---|---|---|
 | `APP_ENV` | `dev` | `dev` (default) or `prod`. In `prod`, `HttpsRedirectMiddleware` is wired and `AppSecretValidator` rejects the dev default. |
-| `APP_DEBUG` | `1` | `1` exposes exception details in `application/problem+json`; `0` hides them. Set to `0` in prod. |
+| `APP_DEBUG` | `1` | `1` exposes exception details in `application/problem+json`; `0` hides them. Set to `0` in prod. Since 0.6.3, the legacy `RequestErrorRenderer` defaults `redactTrace` to `true` (the safe value), so stack frames are suppressed in 5xx bodies even when `APP_DEBUG=1`. To restore stack frames in development, build your own renderer and pass `redactTrace: false` to the `HttpKernel` ctor — see [HTTP kernel and middleware pipeline](http-kernel.md#requesterrorrenderer-legacy-default). |
 | `APP_SECRET` | `dev-only-secret-change-in-prod` | HMAC secret for `SignedCookieJar` (CSRF tokens, signed cookies). In prod, set to **32+ random bytes** (`php bin/framework app:secret`). |
 | `APP_UPLOAD_TMP_DIR` | `<project>/var/tmp` | Where `MultipartBodyParser` writes uploaded files. Override for sandboxed environments. |
 | `APP_TRUSTED_HOSTS` | empty → `Request::TRUSTED_HOSTS_DEFAULT` (`localhost`, `127.0.0.1`, `*.localhost`) | Comma-separated host patterns `HttpsRedirectMiddleware` may reflect into `Location:`. Required in prod. |

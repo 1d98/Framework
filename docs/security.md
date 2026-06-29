@@ -26,10 +26,46 @@ $container->set(CsrfMiddleware::class, static fn(Container $c): CsrfMiddleware =
     exemptPrefixes: ['/api/'],     // bearer-token APIs don't need it
     exemptPaths: ['/health'],
     trustedProxies: $trustedProxies,
+    ttl: 3600,                     // 0.7.2+: reject unsafe requests with a token older than 1 hour
+    graceTtl: 604800,              // 0.7.2+: 7-day window for legacy pre-0.7.2 cookies
 ));
 ```
 
-Reading the token in a handler: `$req->csrfToken()` returns the **plaintext** payload (the `SignedCookieJar` unwraps the HMAC).
+Reading the token in a handler: `$req->csrfToken()` returns the **plaintext** payload (the `SignedCookieJar` unwraps the HMAC). The `<version>:<token>:<issuedAt>` envelope is stripped on read — the bare hex is what you embed in `<input type="hidden" name="_token">` and what you compare on unsafe requests.
+
+### Token TTL and versioned payload (0.7.2+)
+
+As of 0.7.2, the signed cookie payload is the versioned format `1:<bare-hex>:<issuedAt-unix-seconds>` ([`src/Security/CsrfMiddleware.php:272`](../../src/Security/CsrfMiddleware.php)). The bare token still rides the form/header; the `<version>` and `<issuedAt>` live only inside the cookie. Tokens older than `$ttl` seconds (default `3600` = 1 hour) are rejected on unsafe requests with `BadRequestHttpException: CSRF token mismatch: token expired`. A token stamped in the future is also rejected — clock-skew on the cookie side is treated as expired rather than accepted (we have no replay store, so we cannot distinguish "clock drifted" from "forged timestamp").
+
+This closes the long-lived-CSRF-token leak window: an XSS-leaked or log-exfiltrated token is now usable for at most `$ttl` seconds, not the entire session lifetime.
+
+> **Note on plain-HTTP deployments.** A GET request that arrives with an expired v1 cookie over plain HTTP now throws `LogicException: refusing to mint a __Host-csrf_token cookie over an insecure connection` ([`src/Security/CsrfMiddleware.php:230`](../../src/Security/CsrfMiddleware.php), throwing at [`:268`](../../src/Security/CsrfMiddleware.php)). The expired-cookie path on a safe request calls `mintFreshCookie()`, which refuses plain HTTP because `Request::isSecure()` is `false` — the `__Host-` prefix requires `Secure`, which requires TLS. Previously the expired cookie was silently passed through (the next unsafe request would have hit the `token expired` 400 anyway, so this is a "fail-fast" tightening, not a new failure mode). Any plain-HTTP CSRF deployment is already broken at the wire level: even if the cookie *were* minted, the browser would drop the `Secure`-flagged cookie and every subsequent unsafe request would 400. Plain-HTTP dev use of `CsrfMiddleware` is gated by the dev shim — see below.
+
+```php
+$middleware = new CsrfMiddleware(
+    jar: $c->get(SignedCookieJar::class),
+    ttl: 15 * 60,                  // 15 minutes — tighter window for high-value endpoints
+    graceTtl: 0,                   // hard cut-over: refuse pre-0.7.2 cookies immediately
+);
+```
+
+### Migration window for pre-0.7.2 tokens
+
+Legacy payloads (bare 64-char hex, no version, no timestamp) are accepted for `$graceTtl` seconds (default `604800` = 7 days) after the first legacy token is observed by this PHP-FPM / Octane worker ([`src/Security/CsrfMiddleware.php:415`](../../src/Security/CsrfMiddleware.php)). The grace cutoff is recorded process-locally — a `private static ?int $v0CutoffTimestamp` initialised lazily on first v0 observation — so the 7-day clock starts when the new code first serves traffic, not when the package was upgraded.
+
+This is a smooth rollout: existing users are not logged out by a deploy, but operators can force a hard cut-over by setting `graceTtl: 0` (refuse v0 immediately) or shorten the window (e.g. `graceTtl: 86400` = 24 hours) to retire old tokens faster. The cutoff is **not** synchronised across hosts (deliberate — the 7-day default absorbs host-clock skew and per-worker initialisation races).
+
+### Dev SAPI shim (0.7.2+)
+
+The `php -S` dev server is plain HTTP, so `Request::isSecure()` returns `false` and `CsrfMiddleware::mintFreshCookie()` would refuse to mint the `__Host-csrf_token` cookie. `public/index.php` installs a dev-only SAPI shim that promotes `$_SERVER['HTTPS']` to `on` so the rest of the pipeline sees a "secure" request. Three guards keep the shim tight:
+
+1. **`APP_ENV === 'dev'` is required.** The shim fires only on an explicit `dev` env. A misconfigured `staging`, `canary`, or any other non-prod value no longer triggers it — set `APP_ENV=dev` for the dev server, set `APP_ENV=prod` (and serve over HTTPS) for anything else.
+2. **Loopback is matched by CIDR, not exact address.** The immediate `REMOTE_ADDR` is checked against `Request::TRUST_LOOPBACK` (`['127.0.0.0/8', '::1/128']`, [`src/Http/Request/Request.php:41`](../../src/Http/Request/Request.php)) via `CidrMatcher::matchesAny()` ([`src/Http/CidrMatcher.php`](../../src/Http/CidrMatcher.php)). Any address in `127.0.0.0/8` qualifies — not just the literal `127.0.0.1` — so a `php -S 127.0.0.5:8000` dev bind also receives the shim.
+3. **No `X-Forwarded-Proto` / `X-Forwarded-For`.** If either forwarded header is present, the shim is skipped: the operator is in fact behind a proxy and the `trustedProxies` contract on `Request::isSecure()` should govern. The shim also does not run when `APP_TRUSTED_PROXIES` is non-empty, for the same reason — explicit trust configuration wins.
+
+When the shim is active, the framework would also emit `Strict-Transport-Security: max-age=31536000; includeSubDomains` on every response (`SecurityHeadersMiddleware` only fires HSTS when `Request::isSecure()` is true, which the shim forces). That would pin HSTS on the dev browser's `localhost` cache for a year and break plain-HTTP dev sessions after the first one. The shim calls `header_remove('Strict-Transport-Security')` after `Response::send()` to drop the header before PHP flushes it.
+
+> **The shim is a dev convenience, not a security boundary.** A `prod` build cannot accidentally inherit the shim because gate 1 fails; a dev build that is also behind a real proxy cannot accidentally emit `Secure` cookies for an attacker because gate 3 fails. The full shim block (comment + `if`) lives in [`public/index.php`](../../public/index.php) under "Dev-only SAPI shim".
 
 ### Exempt paths must end with `/`
 

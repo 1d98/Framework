@@ -112,7 +112,9 @@ final class CsrfMiddlewareTest extends TestCase
     public function testNonExemptPathStillEnforcesCsrfWhenExemptListConfigured(): void
     {
         $middleware = new CsrfMiddleware($this->jar, exemptPrefixes: ['/api/'], trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
-        $request = new Request('POST', '/form/submit', '', [], 'name=Alice');
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
+        $request = new Request('POST', '/form/submit', '', [], 'name=Alice', null, null, null, [CsrfMiddleware::COOKIE_NAME => $signed]);
 
         $this->expectException(BadRequestHttpException::class);
         $middleware->process($request, static fn(): Response => Response::json(['ok' => true]));
@@ -185,8 +187,11 @@ final class CsrfMiddlewareTest extends TestCase
     {
         $middleware = new CsrfMiddleware($this->jar, trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
 
-        $token = 'token-64-chars-padding-padding-padding-padding-padding-padding';
-        $signed = $this->jar->sign($token);
+        // 64-char hex token — required because the cookie payload format
+        // now embeds the token in `1:<token>:<issuedAt>` and the
+        // middleware rejects anything that is not valid lowercase hex.
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
         $request = new Request(
             'POST',
             '/anything/at/all',
@@ -238,8 +243,8 @@ final class CsrfMiddlewareTest extends TestCase
     {
         $middleware = new CsrfMiddleware($this->jar, trustedProxies: [self::TRUSTED_REMOTE_ADDR]);
 
-        $token = 'no-args-token-64-chars-padding-padding-padding-padding-padding-x';
-        $signed = $this->jar->sign($token);
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
         $request = new Request(
             'POST',
             '/anything/at/all',
@@ -294,8 +299,13 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testGetRequestWithExistingCookieDoesNotRegenerate(): void
     {
-        $token = 'existing-csrf-token-64-chars-padding-padding-padding-padding-padd';
-        $signed = $this->jar->sign($token);
+        // 64 lowercase hex chars — the bare token the middleware extracts
+        // from the v1 payload (`1:<token>:<issuedAt>`). Anything outside
+        // this alphabet (e.g. the old `-`-padded placeholder) is rejected
+        // as `token malformed` by parseAndValidate() and the cookie is
+        // rotated to a freshly-minted one instead of being reused.
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
 
         $capturedRequest = null;
         $response = $this->processAsSecure(function () use ($signed, &$capturedRequest): ResponseInterface {
@@ -397,8 +407,8 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testGetRequestWithValidSignedCookieReusesToken(): void
     {
-        $token = 'reused-csrf-token-64-chars-padding-padding-padding-padding-pad';
-        $signed = $this->jar->sign($token);
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
 
         $capturedRequest = null;
         $response = $this->processAsSecure(function () use ($signed, &$capturedRequest): ResponseInterface {
@@ -453,8 +463,8 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testPostWithValidTokenInHeaderPasses(): void
     {
-        $token = 'valid-csrf-token-64-chars-padding-padding-padding-padding-paddi';
-        $signed = $this->jar->sign($token);
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
         $request = new Request(
             'POST',
             '/submit',
@@ -482,8 +492,8 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testPostWithValidTokenInFormFieldPasses(): void
     {
-        $token = 'form-field-token-64-chars-padding-padding-padding-padding-padd';
-        $signed = $this->jar->sign($token);
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
         $request = new Request(
             'POST',
             '/submit',
@@ -509,9 +519,9 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testHeaderTakesPrecedenceOverFormField(): void
     {
-        $token = 'header-token-64-chars-padding-padding-padding-padding-padding';
-        $formToken = 'form-token-64-chars-padding-padding-padding-padding-padding-x';
-        $signed = $this->jar->sign($token);
+        $token = bin2hex(random_bytes(32));
+        $formToken = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
         $request = new Request(
             'POST',
             '/submit',
@@ -540,9 +550,9 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testPostWithMismatchedTokenThrows(): void
     {
-        $expected = 'expected-token-64-chars-padding-padding-padding-padding-padding';
-        $provided = 'provided-token-64-chars-padding-padding-padding-padding-padding';
-        $signed = $this->jar->sign($expected);
+        $expected = bin2hex(random_bytes(32));
+        $provided = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($expected));
         $request = new Request(
             'POST',
             '/submit',
@@ -598,8 +608,11 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testPostWithMissingTokenThrows(): void
     {
-        $token = 'token-without-match-64-chars-padding-padding-padding-padding-pad';
-        $signed = $this->jar->sign($token);
+        // Cookie is a *valid* v1 payload so the middleware reaches the
+        // request-side check; the request has no header and no form token,
+        // so `token not in request` is the canonical failure message.
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
         $request = new Request(
             'POST',
             '/submit',
@@ -620,8 +633,8 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testPostWithEmptyHeaderTokenThrows(): void
     {
-        $token = 'token-64-chars-padding-padding-padding-padding-padding-padding';
-        $signed = $this->jar->sign($token);
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
         $request = new Request(
             'POST',
             '/submit',
@@ -642,8 +655,8 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testPutAndPatchAndDeleteBehaveLikePost(): void
     {
-        $token = 'token-64-chars-padding-padding-padding-padding-padding-padding';
-        $signed = $this->jar->sign($token);
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
 
         foreach (['PUT', 'PATCH', 'DELETE'] as $method) {
             $request = new Request(
@@ -736,8 +749,13 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testPostWithArrayFormTokenThrowsActionable400(): void
     {
-        $token = 'valid-csrf-token-64-chars-padding-padding-padding-padding-paddi';
-        $signed = $this->jar->sign($token);
+        // The cookie must be a *valid* v1 payload so the middleware
+        // reaches the form-field-array check. A malformed cookie would
+        // short-circuit at parseAndValidate() with `token malformed`
+        // instead of the actionable `_token form field must be a scalar`
+        // message this test is exercising.
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
         $request = new Request(
             'POST',
             '/submit',
@@ -763,8 +781,8 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testPostWithStringFormTokenStillPasses(): void
     {
-        $token = 'valid-csrf-token-64-chars-padding-padding-padding-padding-paddi';
-        $signed = $this->jar->sign($token);
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
         $request = new Request(
             'POST',
             '/submit',
@@ -783,9 +801,9 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testPostWithBothHeaderAndFormLogsNoticeAndHeaderWins(): void
     {
-        $token = 'valid-csrf-token-64-chars-padding-padding-padding-padding-paddi';
-        $formToken = 'form-token-64-chars-padding-padding-padding-padding-padding-x';
-        $signed = $this->jar->sign($token);
+        $token = bin2hex(random_bytes(32));
+        $formToken = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
 
         $logger = new RecordingLogger();
         $middleware = new CsrfMiddleware($this->jar, [], [], $logger, [self::TRUSTED_REMOTE_ADDR]);
@@ -823,9 +841,9 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testPostWithBothHeaderAndFormDoesNotLogWhenLoggerIsNull(): void
     {
-        $token = 'valid-csrf-token-64-chars-padding-padding-padding-padding-paddi';
-        $formToken = 'form-token-64-chars-padding-padding-padding-padding-padding-x';
-        $signed = $this->jar->sign($token);
+        $token = bin2hex(random_bytes(32));
+        $formToken = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
 
         $request = new Request(
             'POST',
@@ -848,8 +866,8 @@ final class CsrfMiddlewareTest extends TestCase
 
     public function testPostWithOnlyFormFieldDoesNotLogNotice(): void
     {
-        $token = 'valid-csrf-token-64-chars-padding-padding-padding-padding-paddi';
-        $signed = $this->jar->sign($token);
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token));
 
         $logger = new RecordingLogger();
         $middleware = new CsrfMiddleware($this->jar, [], [], $logger, [self::TRUSTED_REMOTE_ADDR]);
@@ -869,6 +887,385 @@ final class CsrfMiddlewareTest extends TestCase
         $response = $middleware->process($request, static fn(): Response => Response::json(['ok' => true]));
         self::assertSame(200, $response->status);
         self::assertCount(0, $logger->records, 'Form-only must not emit the dual-source notice');
+    }
+
+    // -------------------------------------------------------------------
+    // TTL behavior (cookie payload version + expiry) — Phase 1 regression.
+    // -------------------------------------------------------------------
+
+    public function testValidV1TokenWithinTtlIsAccepted(): void
+    {
+        // 1-minute-old v1 payload is comfortably within the 1h default ttl.
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token, time() - 60));
+        $request = new Request(
+            'POST',
+            '/submit',
+            '',
+            ['x-csrf-token' => $token],
+            '',
+            null,
+            null,
+            null,
+            [CsrfMiddleware::COOKIE_NAME => $signed],
+        );
+
+        $response = $this->middleware->process($request, static fn(): Response => Response::json(['ok' => true]));
+        self::assertSame(200, $response->status);
+    }
+
+    public function testExpiredV1TokenIsRejected(): void
+    {
+        // 2-hour-old v1 payload is past the 1h default ttl. The middleware
+        // must reject with `token expired`, NOT `token malformed` — the
+        // format is correct; the issue is age.
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token, time() - 7200));
+        $request = new Request(
+            'POST',
+            '/submit',
+            '',
+            ['x-csrf-token' => $token],
+            '',
+            null,
+            null,
+            null,
+            [CsrfMiddleware::COOKIE_NAME => $signed],
+        );
+
+        $this->expectException(BadRequestHttpException::class);
+        $this->expectExceptionMessage('CSRF token mismatch: token expired');
+        $this->middleware->process($request, static fn(): Response => Response::json([]));
+    }
+
+    public function testGetRequestWithExpiredV1CookieMintsFreshOnHttps(): void
+    {
+        // Companion to {@see self::testExpiredV1TokenIsRejected()}. There we
+        // prove that an UNSAFE (POST) request with an expired-but-signed v1
+        // cookie is rejected as `token expired`. Here we pin the GET path,
+        // which is rotation, not rejection: the cookie is expired (signature
+        // fine, TTL elapsed), so we mint a FRESH token and emit it via
+        // Set-Cookie so the user's next unsafe request has a valid one. The
+        // fresh token must be DISTINCT from the stale one — this is the
+        // cookie-fixation guard, and it differs from the signature-failure
+        // case in handleSafe() which CLEARS the cookie instead of minting.
+        //
+        // Plumbing: HTTPS is simulated via the trusted-proxy + X-Forwarded-Proto
+        // header combo (matches the production deployment behind a TLS
+        // terminator). Without this, `mintFreshCookie()` would throw the
+        // LogicException-pinning path — which is correct (`__Host-` requires
+        // Secure) but not what this test is about.
+        $expiredToken = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($expiredToken, time() - 7200));
+
+        $capturedRequest = null;
+        $response = $this->processAsSecure(function () use ($signed, &$capturedRequest): ResponseInterface {
+            return $this->middleware->process(
+                new Request(
+                    'GET',
+                    '/form',
+                    headers: ['x-forwarded-proto' => 'https'],
+                    cookies: [CsrfMiddleware::COOKIE_NAME => $signed],
+                ),
+                function (Request $r) use (&$capturedRequest): Response {
+                    $capturedRequest = $r;
+                    return Response::text('ok');
+                },
+            );
+        });
+
+        self::assertInstanceOf(Request::class, $capturedRequest);
+        // csrfToken() is statically `?string`; the not-null + regex below narrow
+        // it to a plain lower-case hex string, which is the contract of
+        // mintFreshCookie() (32 random bytes → 64 hex chars).
+        $freshToken = $capturedRequest->csrfToken();
+        self::assertNotNull($freshToken, 'Rotation must expose a fresh token to the handler');
+        self::assertMatchesRegularExpression(
+            '/^[0-9a-f]{64}$/',
+            $freshToken,
+            'Fresh token must be 64 lowercase hex chars (matches mintFreshCookie contract)',
+        );
+        self::assertNotSame(
+            $expiredToken,
+            $freshToken,
+            'Fresh token MUST differ from the expired one — reusing the expired token '
+            . 'would defeat TTL enforcement on the next unsafe request',
+        );
+
+        self::assertInstanceOf(Response::class, $response);
+        self::assertSame(200, $response->status);
+        self::assertCount(
+            1,
+            $response->cookies,
+            'Rotation must emit exactly one fresh `__Host-csrf_token` Set-Cookie '
+            . '(distinct from the signature-failure case which CLEARS)',
+        );
+        self::assertSame(CsrfMiddleware::COOKIE_NAME, $response->cookies[0]->name);
+    }
+
+    public function testMalformedPayloadIsRejected(): void
+    {
+        // Neither a valid v1 (`1:<token>:<issuedAt>`) nor a valid v0
+        // (64 lowercase hex chars). The cookie is properly signed
+        // (`garbage`) so the signature check passes; parseAndValidate
+        // must surface the structural failure as `token malformed`.
+        $signed = $this->jar->sign('not-a-valid-csrf-payload');
+        $request = new Request(
+            'POST',
+            '/submit',
+            '',
+            ['x-csrf-token' => 'some-form-token'],
+            '',
+            null,
+            null,
+            null,
+            [CsrfMiddleware::COOKIE_NAME => $signed],
+        );
+
+        $this->expectException(BadRequestHttpException::class);
+        $this->expectExceptionMessage('CSRF token mismatch: token malformed');
+        $this->middleware->process($request, static fn(): Response => Response::json([]));
+    }
+
+    public function testV0LegacyTokenIsAcceptedDuringGracePeriod(): void
+    {
+        // Legacy v0: bare 64-char hex with NO version prefix and NO
+        // timestamp. The middleware's static v0-cutoff is initialised
+        // lazily on the first v0 observation to `time() + graceTtl`
+        // (default 7 days), so any legacy token seen during this run
+        // is within the grace window.
+        //
+        // We can't share the `$v0CutoffTimestamp` static across runs
+        // (PHPUnit spawns a fresh PHP process per test class), but we
+        // CAN rely on its lazy initialisation on first sight. After
+        // the very first v0 token, the cutoff is locked in for the
+        // remaining tests in this class.
+        $token = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; // 64 × 'a'
+        $signed = $this->jar->sign($token);
+        $request = new Request(
+            'POST',
+            '/submit',
+            '',
+            ['x-csrf-token' => $token],
+            '',
+            null,
+            null,
+            null,
+            [CsrfMiddleware::COOKIE_NAME => $signed],
+        );
+
+        $response = $this->middleware->process($request, static fn(): Response => Response::json(['ok' => true]));
+        self::assertSame(200, $response->status);
+    }
+
+    public function testZeroTtlDisablesTtlEnforcement(): void
+    {
+        // Pins the docblock claim that `ttl=0` disables TTL enforcement:
+        // any v1 payload — no matter how old — must be accepted when the
+        // operator opts out of the age cap. See parseAndValidate() at
+        // src/Security/CsrfMiddleware.php:419-424 — the `$age > $ttl`
+        // branch is gated on `$this->ttl > 0`, so `ttl=0` skips it. The
+        // 2-hour age is well past the 1h default and chosen so the test
+        // fails loudly if anyone re-introduces the `age > 0` regression.
+        //
+        // Previously named `testZeroTtlRejectsAnyNonFreshV1Token`, which
+        // pinned a known-bug behaviour where `ttl=0` collapsed the
+        // comparison to `age > 0` (Unix-second resolution ⇒ reject any
+        // token ≥ 1s old). The bug was fixed in 0.7.2 to match the
+        // docblock; this test now pins the corrected behaviour.
+        $middleware = $this->makeMiddlewareWithTtl(0, graceTtl: 0);
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token, time() - 7200));
+        $request = new Request(
+            'POST',
+            '/submit',
+            '',
+            ['x-csrf-token' => $token],
+            '',
+            null,
+            null,
+            null,
+            [CsrfMiddleware::COOKIE_NAME => $signed],
+        );
+
+        $captured = null;
+        $response = $middleware->process(
+            $request,
+            function (Request $r) use (&$captured): Response {
+                $captured = $r;
+                return Response::text('ok');
+            },
+        );
+
+        self::assertSame(200, $response->status, 'Stale token must NOT be rejected when ttl=0');
+        self::assertInstanceOf(Request::class, $captured, 'Handler must run — middleware must not short-circuit on age');
+        self::assertSame(
+            $token,
+            $captured->csrfToken(),
+            'Handler must see the bare 64-char hex token extracted from the v1 cookie payload',
+        );
+    }
+
+    public function testZeroTtlDoesNotMaskClockSkewGuard(): void
+    {
+        // Companion to {@see self::testZeroTtlDisablesTtlEnforcement()}.
+        // The clock-skew check at src/Security/CsrfMiddleware.php:419-420
+        // (`if ($age < 0)`) is INTENTIONALLY independent of the `$ttl > 0`
+        // gate on line 422 — a token stamped in the future is ALWAYS
+        // rejected, even when the operator has disabled the TTL cap.
+        // This pins the docblock's "Tokens stamped in the future (clock
+        // skew) are ALWAYS rejected" claim so a future refactor can't
+        // accidentally fold the two branches together.
+        $middleware = $this->makeMiddlewareWithTtl(0, graceTtl: 0);
+        $token = bin2hex(random_bytes(32));
+        // 60 seconds ahead — large enough to survive a slow test runner
+        // (we're not racing the wall clock on the negative direction).
+        $signed = $this->jar->sign($this->v1Payload($token, time() + 60));
+        $request = new Request(
+            'POST',
+            '/submit',
+            '',
+            ['x-csrf-token' => $token],
+            '',
+            null,
+            null,
+            null,
+            [CsrfMiddleware::COOKIE_NAME => $signed],
+        );
+
+        $this->expectException(BadRequestHttpException::class);
+        $this->expectExceptionMessage('CSRF token mismatch: token expired');
+        $middleware->process($request, static fn(): Response => Response::json([]));
+    }
+
+    /**
+     * Direct exercise of the `graceTtl=0` cut-over would require the
+     * static `$v0CutoffTimestamp` to be in the past, but Unix-second
+     * resolution makes the `time() > cutoff` check racy at sub-second
+     * latency. Instead we verify the deterministic property: the
+     * middleware initialises `$v0CutoffTimestamp = time() + graceTtl`
+     * on the first v0 sight, and the operator-facing knob is wired
+     * through to the storage layer.
+     *
+     * We can't unit-test the rejection path *behavior* of `graceTtl=0`
+     * without a 1-second `sleep()` and a shared-process static state
+     * that may already be locked by another test. The reflection-based
+     * check pins the implementation surface; the runtime behaviour is
+     * covered by {@see self::testV0LegacyTokenIsAcceptedDuringGracePeriod()}
+     * exercising the default (7-day) grace window.
+     */
+    #[\PHPUnit\Framework\Attributes\RunInSeparateProcess]
+    #[\PHPUnit\Framework\Attributes\PreserveGlobalState(false)]
+    public function testZeroGraceTtlInitialisesCutoffToNowInFreshProcess(): void
+    {
+        // Fresh worker → `$v0CutoffTimestamp` starts at `null`.
+        $middleware = $this->makeMiddlewareWithTtl(3600, graceTtl: 0);
+
+        // Before any v0 token is seen, the cutoff is null.
+        $cutoffBefore = $this->readV0Cutoff();
+        self::assertNull($cutoffBefore, 'v0 cutoff must start unset');
+
+        // Observe a v0 token → triggers the `??= time() + graceTtl` branch.
+        $token = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'; // 64 × 'c'
+        $signed = $this->jar->sign($token);
+        $request = new Request(
+            'POST',
+            '/submit',
+            '',
+            ['x-csrf-token' => $token],
+            '',
+            null,
+            null,
+            null,
+            [CsrfMiddleware::COOKIE_NAME => $signed],
+        );
+
+        $before = time();
+        $middleware->process($request, static fn(): Response => Response::json(['ok' => true]));
+        $after = time();
+
+        $cutoffAfter = $this->readV0Cutoff();
+        self::assertNotNull($cutoffAfter, 'cutoff must be set after the first v0 observation');
+        // graceTtl=0 ⇒ cutoff is pinned to the `time()` value seen inside
+        // parseAndValidate() at first v0 sight. Tolerate off-by-one from
+        // the wall clock advancing across the process() call.
+        self::assertGreaterThanOrEqual($before, $cutoffAfter);
+        self::assertLessThanOrEqual($after, $cutoffAfter);
+    }
+
+    private function readV0Cutoff(): ?int
+    {
+        $ref = new \ReflectionProperty(CsrfMiddleware::class, 'v0CutoffTimestamp');
+        /** @var ?int $value */
+        $value = $ref->getValue();
+        return $value;
+    }
+
+    public function testTtlRejectsFutureDatedV1TokenAsExpired(): void
+    {
+        // Clock skew guard: a v1 payload stamped in the future is
+        // rejected as expired (negative age) rather than accepted
+        // with an extended TTL window. We use 1 hour ahead — well
+        // outside any plausible clock skew between the minter and
+        // the validator.
+        $token = bin2hex(random_bytes(32));
+        $signed = $this->jar->sign($this->v1Payload($token, time() + 3600));
+        $request = new Request(
+            'POST',
+            '/submit',
+            '',
+            ['x-csrf-token' => $token],
+            '',
+            null,
+            null,
+            null,
+            [CsrfMiddleware::COOKIE_NAME => $signed],
+        );
+
+        $this->expectException(BadRequestHttpException::class);
+        $this->expectExceptionMessage('CSRF token mismatch: token expired');
+        $this->middleware->process($request, static fn(): Response => Response::json([]));
+    }
+
+    // -------------------------------------------------------------------
+    // Test helpers.
+    // -------------------------------------------------------------------
+
+    /**
+     * Mint a v1 cookie payload string:
+     *   `1:<bare-hex>:<issuedAt-unix-seconds>`
+     *
+     * The middleware embeds this string under the HMAC; on a POST, it
+     * extracts the bare-hex portion (the `<token>` part) and compares
+     * it byte-for-byte against the value the client put in the
+     * `X-CSRF-Token` header / `_token` form field. The timestamp
+     * lives only on the cookie side — clients never see it.
+     *
+     * @param string $token    64 lowercase hex chars (32 random bytes)
+     * @param ?int   $issuedAt Unix seconds. Defaults to `time()` for "just minted".
+     */
+    private function v1Payload(string $token, ?int $issuedAt = null): string
+    {
+        return '1:' . $token . ':' . ($issuedAt ?? time());
+    }
+
+    /**
+     * Construct a fresh middleware with a custom `ttl` (and optional
+     * `graceTtl`). Used by the TTL regression tests that need to
+     * toggle the expiry knobs in isolation from the shared
+     * `$this->middleware` setup.
+     */
+    private function makeMiddlewareWithTtl(int $ttl, int $graceTtl = 604800): CsrfMiddleware
+    {
+        return new CsrfMiddleware(
+            $this->jar,
+            exemptPrefixes: [],
+            exemptPaths: [],
+            logger: null,
+            trustedProxies: [self::TRUSTED_REMOTE_ADDR],
+            ttl: $ttl,
+            graceTtl: $graceTtl,
+        );
     }
 
     /**

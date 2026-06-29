@@ -149,6 +149,24 @@ $router->get('/files/{name}', static function (Request $r, array $p): ResponseIn
 
 When `$contentLength` is `null` (the default) the response auto-uses chunked transfer encoding. Set `$contentLength` whenever the size is known — it makes the connection more cacheable, lets the browser allocate the right buffer, and removes the `Transfer-Encoding: chunked` overhead.
 
+## PHP extension requirements
+
+`StreamedResponse::send()` uses `Transfer-Encoding: chunked` for responses with unknown body length (the common case for streaming). The native PHP implementation is the `http` stream filter from the `pecl_http` extension. **`pecl_http` is NOT bundled with PHP** — it is a PECL extension that must be installed separately (most package managers ship it as `php-http` or `php8.x-http`).
+
+When `pecl_http` is missing, the framework falls back to a userland chunked-encoding implementation ([`Framework\Http\Response\ChunkedStreamWriter`](../../src/Http/Response/ChunkedStreamWriter.php)) that produces the same wire format per RFC 7230 §4.1. The fallback is **transparent to operators and consumers** — no flag, no opt-in. The trade-off is a slight performance hit because every `fwrite()` to the emitter stream is intercepted by userland code.
+
+Operators can detect the runtime capability:
+
+```php
+if (Framework\Http\Response\StreamedResponse::isHttpFilterAvailable()) {
+    // Native pecl_http filter is available — fastest path.
+} else {
+    // Userland fallback is in use — slightly slower but RFC-compliant.
+}
+```
+
+In practice: stock `php` packages on Debian/Ubuntu (`php-cli`, `php-fpm`) do NOT include `pecl_http`. Apache `mod_php` builds often do (because PECL extensions are commonly enabled at build time). Verify with `php -m | grep -i http` or the capability probe above.
+
 ## Deployment gotchas
 
 Streaming interacts with every layer between PHP and the browser. A misconfigured layer will silently buffer your bytes and the client will receive them only after the emitter returns — which defeats the point.

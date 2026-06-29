@@ -5,7 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.2] - 2026-06-29
+
+### Security
+- **CSRF token TTL.** `CsrfMiddleware` ([`src/Security/CsrfMiddleware.php`](../../src/Security/CsrfMiddleware.php)) now embeds an `issuedAt` timestamp into the signed cookie payload. The new on-the-wire format is `1:<bare-hex>:<issuedAt-unix-seconds>` ([line 272](../../src/Security/CsrfMiddleware.php)). Tokens older than the new `$ttl` ctor arg (default `3600` = 1 hour) are rejected on unsafe requests with `BadRequestHttpException: CSRF token mismatch: token expired`. This closes the long-lived-CSRF-token leak window — an XSS-leaked or log-exfiltrated token is now usable for at most 1 hour instead of the entire session lifetime. Tokens stamped in the future (clock skew) are also rejected as expired; the middleware has no replay store, so a forged timestamp is indistinguishable from a skewed one.
+- **Pre-0.7.2 legacy migration window.** Bare-hex payloads from 0.7.1 and earlier (no version, no timestamp) are accepted for the new `$graceTtl` ctor arg seconds (default `604800` = 7 days) after the first legacy token is observed by each PHP-FPM / Octane worker ([line 415](../../src/Security/CsrfMiddleware.php)). The cutoff is recorded process-locally — `private static ?int $v0CutoffTimestamp` initialised lazily — so the 7-day clock starts when the new code first serves traffic. Set `graceTtl: 0` to force a hard cut-over (refuse v0 immediately) or shorten the window to retire old tokens faster. Multi-host deployments do not synchronise the cutoff across hosts; the 7-day default absorbs host-clock skew and per-worker initialisation races.
+- **New ctor parameters.** `$ttl: int = 3600` and `$graceTtl: int = 604800` on `CsrfMiddleware` ([line 124](../../src/Security/CsrfMiddleware.php)). Negative values throw `InvalidArgumentException` at construction. Setting `$ttl: 0` disables TTL enforcement (legacy long-lived behaviour — explicitly documented as not recommended).
+- **Behavior change: expired CSRF cookie on plain HTTP throws `LogicException`.** `CsrfMiddleware::handleSafe()` now rotates to a fresh cookie when the existing one is past `$ttl` ([line 230](../../src/Security/CsrfMiddleware.php)). On plain HTTP (where `__Host-` cookies are refused), this rotation throws `LogicException: refusing to mint a __Host-csrf_token cookie over an insecure connection` ([line 268](../../src/Security/CsrfMiddleware.php)). Previously, an expired v1 cookie on plain HTTP was silently passed through. The new behavior is correct on the merits — any plain-HTTP CSRF is already broken at the wire level (the `Secure`-flagged cookie would be dropped by the browser) — but the change is observable and may surface in tests that assumed silent expiry.
+
+### Changed
+- **Dev SAPI shim in `public/index.php` requires an explicit `APP_ENV=dev` and uses the loopback CIDR list.** The `php -S` shim that promotes the SAPI to report `HTTPS=on` is now gated on `$appEnv === 'dev'` (was `$appEnv !== 'prod'` — anything not literally `prod`, including a misconfigured `staging`, used to receive the shim). The immediate-connection check now matches the `Request::TRUST_LOOPBACK` CIDR list via `CidrMatcher::matchesAny()` ([`src/Http/CidrMatcher.php`](../../src/Http/CidrMatcher.php)) instead of the literal `REMOTE_ADDR === '127.0.0.1' || $remoteAddr === '::1'` check, so addresses in `127.0.0.0/8` also receive the shim (not just the exact `127.0.0.1`). The shim now also removes any `Strict-Transport-Security` header that the framework would otherwise emit on the shimmed-secure request, so a dev session cannot pin HSTS on the `localhost` browser cache for a year.
+
+## [0.7.1] - Unreleased
+
+### Fixed
+- **`StreamedResponse::send()` no longer requires `pecl_http`.** On stock PHP builds without the `http` stream filter, the response now falls back to a userland chunked-encoding implementation ([`Framework\Http\Response\ChunkedStreamWriter`](../../src/Http/Response/ChunkedStreamWriter.php)). The wire format is identical per RFC 7230 §4.1; performance is slightly lower because every `fwrite()` is intercepted by userland code. The previous `LogicException` for missing `pecl_http` is no longer thrown. New capability probe: `StreamedResponse::isHttpFilterAvailable(): bool` ([`src/Http/Response/StreamedResponse.php:109`](../../src/Http/Response/StreamedResponse.php)).
+- **Examples** — `examples/streaming.php` now runs on any PHP build (was previously only functional on `mod_php` builds with `pecl_http`).
 
 ## [0.7.0] - 2026-06-28
 

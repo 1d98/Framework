@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Framework\Container\Container;
 use Framework\Framework;
+use Framework\Http\CidrMatcher;
 use Framework\Http\Exception\BadRequestHttpException;
 use Framework\Http\Exception\NotFoundHttpException;
 use Framework\Http\HttpKernel;
@@ -49,6 +50,58 @@ $trustedProxies = array_values(array_filter(
     array_map('trim', explode(',', getenv('APP_TRUSTED_PROXIES') ?: '')),
     static fn(string $p): bool => $p !== '',
 ));
+
+// Dev-only SAPI shim: when running on the built-in `php -S` dev server
+// (or any plain-HTTP loopback request), the connection is NOT HTTPS, so
+// `Request::isSecure()` returns false and CsrfMiddleware refuses to mint
+// the `__Host-csrf_token` cookie (the `__Host-` prefix requires the
+// `Secure` flag, which requires HTTPS). To let dev "just work" without
+// a real TLS terminator and without a real browser, we promote the SAPI
+// to report the connection as HTTPS — but only for DIRECT loopback
+// requests that did NOT come through a reverse proxy. The "did not come
+// through a reverse proxy" signal is: the client did not set any
+// `X-Forwarded-*` headers. If the operator is in fact behind a proxy
+// (and forwarded headers are present), we do NOT shim, so the
+// trustedProxies contract still gates the secure check as designed.
+//
+// Gates (ALL must hold for the shim to fire):
+//   1. APP_ENV is EXACTLY 'dev' (unset / 'production' / 'staging' / … → no-op).
+//   2. The operator has not explicitly set APP_TRUSTED_PROXIES.
+//   3. The immediate connection is on the loopback range, evaluated via
+//      CidrMatcher against Request::TRUST_LOOPBACK (`127.0.0.0/8`,
+//      `::1/128`). This covers `127.0.0.1` and the IPv6 loopback, and
+//      will track any future widening of the framework's loopback set
+//      without code changes here.
+//   4. No `X-Forwarded-Proto` / `X-Forwarded-For` header is present
+//      (the request did not transit a reverse proxy).
+//
+// SIDE-EFFECT SUPPRESSION. Setting `$_SERVER['HTTPS'] = 'on'` makes
+// `Request::isSecure()` return true, which causes
+// `SecurityHeadersMiddleware` (further down the pipeline) to emit
+// `Strict-Transport-Security: max-age=31536000; includeSubDomains`.
+// On plain HTTP that is a footgun: modern browsers (Chromium) honour
+// HSTS even for `127.0.0.1`, so a single response from the dev server
+// would pin the loopback to HTTPS for a year. We set the
+// `X_DEV_HTTPS_SHIM` sentinel and remove any `Strict-Transport-Security`
+// header that may have been queued before `send()` flushes headers —
+// the shim's effect on `isSecure()` (which only matters for the
+// `__Host-` cookie) is preserved, while the HSTS side-effect is undone.
+$rawTrustedProxies = getenv('APP_TRUSTED_PROXIES');
+$remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
+$hasForwardedProto = !empty($_SERVER['HTTP_X_FORWARDED_PROTO']);
+$hasForwardedFor = !empty($_SERVER['HTTP_X_FORWARDED_FOR']);
+$devShimActive = false;
+if (getenv('APP_ENV') === 'dev'
+    && ($rawTrustedProxies === false || $rawTrustedProxies === '')
+    && $remoteAddr !== ''
+    && CidrMatcher::matchesAny(Request::TRUST_LOOPBACK, $remoteAddr)
+    && !$hasForwardedProto
+    && !$hasForwardedFor
+) {
+    $_SERVER['HTTPS'] = 'on';
+    $_SERVER['X_DEV_HTTPS_SHIM'] = '1';
+    $devShimActive = true;
+}
 
 $container = new Container();
 $container->set(LoggerInterface::class, static fn(): LoggerInterface => StreamLogger::stderr());
@@ -215,6 +268,16 @@ $kernel = new HttpKernel($router, $pipeline, $container, $logger, $debug);
 
 $request = Request::fromGlobals()->withValidator($container->get(Validator::class));
 $response = $kernel->handle($request);
+
+if ($devShimActive && !headers_sent()) {
+    // The dev HTTPS shim above made isSecure() report true so the
+    // `__Host-csrf_token` cookie can be minted over plain HTTP. That
+    // also made SecurityHeadersMiddleware queue an HSTS header, which
+    // would pin the loopback to HTTPS for a year in Chromium. Strip it
+    // before send() flushes — see the comment block on the shim above
+    // for the full rationale.
+    header_remove('Strict-Transport-Security');
+}
 
 $logger->info('request', [
     'request_id' => $request->id,

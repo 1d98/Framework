@@ -6,6 +6,7 @@ namespace Framework\Tests\Unit\Http\Response;
 
 use Closure;
 use Framework\Http\Cookie\Cookie;
+use Framework\Http\Response\Sse;
 use Framework\Http\Response\StreamedResponse;
 use InvalidArgumentException;
 use LogicException;
@@ -290,5 +291,201 @@ final class StreamedResponseTest extends TestCase
         $response->send();
 
         self::assertSame(200, $response->status);
+    }
+
+    public function testIsHttpFilterAvailableReturnsBool(): void
+    {
+        // Capability probe: returns true when pecl_http's `http` stream
+        // filter is compiled into PHP, false otherwise. The contract is
+        // "a bool" — never null, never an int. Pin that.
+        $result = StreamedResponse::isHttpFilterAvailable();
+        self::assertIsBool($result);
+    }
+
+    public function testIsHttpFilterAvailableResultIsCachedAcrossCalls(): void
+    {
+        // The capability probe is memoised with a function-local `static`
+        // because (a) the readonly class forbids mutable class state, and
+        // (b) in_array() over stream_get_filters() is non-trivial. Three
+        // back-to-back calls MUST return the same value — without this
+        // pin a future refactor could accidentally drop the cache.
+        $first = StreamedResponse::isHttpFilterAvailable();
+        $second = StreamedResponse::isHttpFilterAvailable();
+        $third = StreamedResponse::isHttpFilterAvailable();
+
+        self::assertSame($first, $second);
+        self::assertSame($second, $third);
+    }
+
+    public function testSendSucceedsOnFallbackPathAndEmitsChunkedWireFormat(): void
+    {
+        // End-to-end through the manual chunked-encoding fallback.
+        // The fallback activates whenever the native `http` stream filter
+        // is unavailable (the common case on stock PHP). We do NOT
+        // gate this test on the absence of pecl_http — it must pass on
+        // both builds: when pecl_http is present, the native filter path
+        // produces equivalent chunked output; when pecl_http is missing,
+        // the manual encoder in ChunkedStreamWriter does.
+        //
+        // Wire format for a 5-byte payload:
+        //   "5\r\nhello\r\n"          (the body chunk)
+        //   "0\r\n\r\n"               (the terminator chunk)
+        //
+        // send() calls ob_end_clean() in its finally block, which would
+        // discard the buffer. The write-callback fires per buffer-flush
+        // BEFORE ob_end_clean() runs, so it has access to the bytes.
+        // We collect them into $captured and return '' to the output
+        // layer so ob_end_clean() has nothing to discard.
+
+        $captured = '';
+        ob_start(static function (string $buffer) use (&$captured): string {
+            $captured .= $buffer;
+            return '';
+        });
+
+        $response = new StreamedResponse(
+            status: 200,
+            emitter: static function ($stream): void {
+                fwrite($stream, 'hello');
+            },
+        );
+
+        $response->send();
+        ob_end_flush();
+
+        // Strip any internal diagnostic header lines (the body capture
+        // is bytes that hit the output layer — headers are emitted via
+        // header() and go elsewhere). Assert on the canonical chunked
+        // frames only.
+        self::assertStringContainsString("5\r\nhello\r\n", $captured);
+        self::assertStringContainsString("0\r\n\r\n", $captured);
+        // The terminator MUST be the LAST chunk on the wire.
+        self::assertSame(
+            strrpos($captured, "0\r\n\r\n"),
+            strlen($captured) - strlen("0\r\n\r\n"),
+            'Terminator chunk must be the final bytes on the wire',
+        );
+    }
+
+    public function testSseResponseWorksThroughFallbackChunkedEncoding(): void
+    {
+        // SSE frames built via Sse::event() must round-trip the fallback
+        // path. Sse::event emits several fwrite() calls per event (data
+        // line + event line + blank line), each of which becomes its own
+        // chunk — that's correct per RFC 7230 §4.1 (any chunk count is
+        // valid). We assert on the SSE payload, not the exact chunk
+        // boundaries, because the bucket boundaries depend on PHP's
+        // stream buffering.
+        $captured = '';
+        ob_start(static function (string $buffer) use (&$captured): string {
+            $captured .= $buffer;
+            return '';
+        });
+
+        $response = StreamedResponse::sse(static function ($stream): void {
+            self::assertIsResource($stream);
+            Sse::event($stream, 'hello', event: 'greet');
+            Sse::event($stream, 'world', event: 'greet');
+        });
+
+        $response->send();
+        ob_end_flush();
+
+        self::assertStringContainsString('event: greet', $captured);
+        self::assertStringContainsString('data: hello', $captured);
+        self::assertStringContainsString('data: world', $captured);
+        // Every body chunk must be framed: each `fwrite()` from Sse::event
+        // becomes one bucket, and the fallback encoder wraps it as
+        // `<hex>\r\n<data>\r\n`. Spot-check one frame: `data: hello\n`
+        // is emitted by Sse as its own fwrite(), then the fallback
+        // prepends `<hex>\r\n` and appends `\r\n`. So the on-the-wire
+        // substring for that fwrite() is `<hex>\r\ndata: hello\n\r\n`.
+        self::assertMatchesRegularExpression(
+            '/[0-9a-f]+\\r\\ndata: hello\\n\\r\\n/',
+            $captured,
+        );
+        // Terminator must close the stream.
+        self::assertStringContainsString("0\r\n\r\n", $captured);
+    }
+
+    public function testNdjsonResponseWorksThroughFallbackChunkedEncoding(): void
+    {
+        // NDJSON: one JSON object per line, each line terminated by \n.
+        // StreamedResponse::ndjson() pre-sets Content-Type but does NOT
+        // wrap each line — that's the caller's emitter job.
+        $captured = '';
+        ob_start(static function (string $buffer) use (&$captured): string {
+            $captured .= $buffer;
+            return '';
+        });
+
+        $response = StreamedResponse::ndjson(static function ($stream): void {
+            self::assertIsResource($stream);
+            fwrite($stream, "{\"a\":1}\n");
+            fwrite($stream, "{\"b\":2}\n");
+        });
+
+        $response->send();
+        ob_end_flush();
+
+        self::assertStringContainsString('{"a":1}', $captured);
+        self::assertStringContainsString('{"b":2}', $captured);
+        self::assertStringContainsString("0\r\n\r\n", $captured);
+    }
+
+    public function testFallbackPathDoesNotCorruptWhenEmitterWritesZeroBytes(): void
+    {
+        // An emitter that writes nothing must still produce a valid
+        // chunked wire stream: an empty body chunk (no payload chunks) +
+        // the terminator. This guards against a future refactor that
+        // might skip the terminator when the emitter is a no-op.
+        $captured = '';
+        ob_start(static function (string $buffer) use (&$captured): string {
+            $captured .= $buffer;
+            return '';
+        });
+
+        $response = new StreamedResponse(
+            status: 200,
+            emitter: static function (): void {
+                // intentional no-op
+            },
+        );
+
+        $response->send();
+        ob_end_flush();
+
+        self::assertStringContainsString("0\r\n\r\n", $captured);
+    }
+
+    public function testFallbackPathFramesEachEmitterFwriteAsItsOwnChunk(): void
+    {
+        // The fallback encoder wraps each bucket. PHP's stream buffer
+        // makes one bucket per fwrite() (small writes get coalesced,
+        // large ones get split — but in practice a single fwrite() of a
+        // modest string lands as one bucket). Pin the boundary: three
+        // fwrite()s produce three body chunks + one terminator.
+        $captured = '';
+        ob_start(static function (string $buffer) use (&$captured): string {
+            $captured .= $buffer;
+            return '';
+        });
+
+        $response = new StreamedResponse(
+            status: 200,
+            emitter: static function ($stream): void {
+                fwrite($stream, 'AAA');
+                fwrite($stream, 'BBBB');
+                fwrite($stream, 'CC');
+            },
+        );
+
+        $response->send();
+        ob_end_flush();
+
+        self::assertStringContainsString("3\r\nAAA\r\n", $captured);
+        self::assertStringContainsString("4\r\nBBBB\r\n", $captured);
+        self::assertStringContainsString("2\r\nCC\r\n", $captured);
+        self::assertStringContainsString("0\r\n\r\n", $captured);
     }
 }

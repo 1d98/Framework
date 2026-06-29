@@ -13,12 +13,12 @@ final class FrameworkVersionTest extends TestCase
 {
     public function testVersionStringMatchesRelease(): void
     {
-        self::assertSame('0.7.0', Framework::VERSION);
+        self::assertSame('0.7.2', Framework::VERSION);
     }
 
     public function testVersionTripleMatchesRelease(): void
     {
-        self::assertSame([0, 7, 0], Framework::VERSION_TRIPLE);
+        self::assertSame([0, 7, 2], Framework::VERSION_TRIPLE);
     }
 
     public function testVersionStabilityIsPreOne(): void

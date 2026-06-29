@@ -160,6 +160,8 @@ new StreamedResponse(
 | `$contentLength` | `?int`. When `null`, `send()` wraps `php://output` in the PHP `http` chunked-transfer stream filter (`Transfer-Encoding: chunked`). When set, used as the `Content-Length` header (and chunking is disabled). |
 | `$contentType` | `?string`. Convenience: if `Content-Type` is not in `$headers`, this value is used. |
 
+**Chunked-encoding fallback.** When the `pecl_http` extension is not available on the PHP build, `send()` falls back to a userland chunked-encoding filter ([`Framework\Http\Response\ChunkedStreamWriter`](../../src/Http/Response/ChunkedStreamWriter.php)). The wire format is identical per RFC 7230 §4.1; performance is slightly lower because every `fwrite()` is intercepted by userland code. The capability can be probed via the static method `StreamedResponse::isHttpFilterAvailable()`. See [PHP extension requirements](streaming-response.md#php-extension-requirements) for the deployment picture.
+
 ### Static helpers
 
 ```php

@@ -32,6 +32,15 @@ use Throwable;
  * STDERR write is guarded against a closed stream so it never emits a
  * PHP warning that would itself land in the PHP error log.
  *
+ * **Transfer-Encoding: chunked fallback.** When the `pecl_http`
+ * extension is not compiled into PHP, the native `http` stream
+ * filter is unavailable. `send()` falls back to a manual
+ * chunked-encoding wrapper (RFC 7230 §4.1) registered as
+ * `framework.chunked_writer`. The wire format is identical;
+ * performance is slightly lower because every `fwrite()` is
+ * intercepted by userland code. The shipped `ChunkedStreamWriter`
+ * class is the implementation.
+ *
  * Constraints enforced at construction:
  *  - $emitter must be a Closure (the property type enforces this);
  *  - $status in [100, 599];
@@ -39,6 +48,12 @@ use Throwable;
  *  - $contentLength: non-negative if set;
  *  - header name + value: rejects [\r\n:] and [\r\n\0] respectively;
  *  - cookies: typed Cookie VO, validates itself.
+ *
+ * @method static bool isHttpFilterAvailable()  Whether the native
+ *     `pecl_http` chunked-transfer filter is available on this
+ *     PHP build. `false` means `send()` will use the manual
+ *     chunked-encoding fallback. Exposed for operators who want
+ *     to detect the runtime capability (e.g. for a healthcheck).
  */
 final readonly class StreamedResponse implements ResponseInterface
 {
@@ -76,6 +91,28 @@ final readonly class StreamedResponse implements ResponseInterface
         if ($this->contentType !== null) {
             self::assertValidHeaderValue($this->contentType);
         }
+    }
+
+    /**
+     * Whether the native `pecl_http` chunked-transfer stream filter
+     * is available on this PHP build. The filter is part of the
+     * `pecl_http` extension, which is NOT bundled with PHP and is
+     * rarely installed on stock builds. When this returns `false`,
+     * `send()` falls back to {@see \Framework\Http\Response\ChunkedStreamWriter}
+     * (RFC 7230 §4.1 manual chunked encoding).
+     *
+     * Cached with a function-local `static` because `final readonly
+     * class` forbids class-level mutable state; `in_array()` over
+     * the full filter registry is also non-trivial, so we only do
+     * it once per process.
+     */
+    public static function isHttpFilterAvailable(): bool
+    {
+        static $cached = null;
+        if ($cached !== true && $cached !== false) {
+            $cached = in_array('http', stream_get_filters(), true);
+        }
+        return $cached;
     }
 
     public static function sse(Closure $emitter, int $status = 200): self
@@ -200,11 +237,42 @@ final readonly class StreamedResponse implements ResponseInterface
             throw new LogicException('StreamedResponse::send() cannot open php://output');
         }
 
+        $useFallbackChunked = false;
+        $fallbackFilter = null;
         if ($useChunked) {
-            $filter = stream_filter_append($stream, 'http', STREAM_FILTER_WRITE, ['transfer' => 'chunked']);
-            if ($filter === false) {
-                fclose($stream);
-                throw new LogicException("StreamedResponse::send() cannot attach the 'http' chunked filter; check that the http stream filter is compiled in");
+            if (self::isHttpFilterAvailable()) {
+                $filter = stream_filter_append($stream, 'http', STREAM_FILTER_WRITE, ['transfer' => 'chunked']);
+                if ($filter === false) {
+                    fclose($stream);
+                    throw new LogicException("StreamedResponse::send() cannot attach the 'http' chunked filter; check that the http stream filter is compiled in");
+                }
+            } else {
+                // `pecl_http` is missing on this PHP build (the common case —
+                // the extension is not bundled). Fall back to a userland
+                // chunked-encoding wrapper that intercepts every fwrite()
+                // against the emitter stream and frames each bucket in
+                // RFC 7230 §4.1 chunk format. The final terminator chunk
+                // (`0\r\n\r\n`) is emitted in the finally block below,
+                // mirroring the native filter's close-time behaviour.
+                //
+                // stream_filter_register() returns false if the name is
+                // already registered (legitimate on a second send() within
+                // the same request), so we only treat the negative return
+                // as an error when the filter is genuinely missing.
+                if (!in_array('framework.chunked_writer', stream_get_filters(), true)) {
+                    $registered = stream_filter_register('framework.chunked_writer', ChunkedStreamWriter::class);
+                    if ($registered === false) {
+                        fclose($stream);
+                        throw new LogicException('StreamedResponse::send() cannot register the chunked-encoding fallback filter');
+                    }
+                }
+                $writer = stream_filter_append($stream, 'framework.chunked_writer', STREAM_FILTER_WRITE);
+                if ($writer === false) {
+                    fclose($stream);
+                    throw new LogicException('StreamedResponse::send() cannot attach the chunked-encoding fallback filter');
+                }
+                $fallbackFilter = $writer;
+                $useFallbackChunked = true;
             }
         }
 
@@ -241,6 +309,27 @@ final readonly class StreamedResponse implements ResponseInterface
             }
             throw $e;
         } finally {
+            if ($useFallbackChunked) {
+                // Detach the manual encoder first so the terminator
+                // is not itself re-framed (which would produce a
+                // chunk of `5\r\n0\r\n\r\n\r\n` instead of the
+                // canonical `0\r\n\r\n`). The @-suppressor on
+                // stream_filter_remove handles the edge case where
+                // PHP has already disposed of the filter resource
+                // (it shouldn't, but the call can fail on Windows
+                // when the stream is in a half-closed state).
+                if ($fallbackFilter !== null) {
+                    @stream_filter_remove($fallbackFilter);
+                }
+                // Emit the final terminator chunk for the manual
+                // chunked encoder: `0\r\n\r\n`. The native pecl_http
+                // filter emits this on close, so the fallback path
+                // has to do it explicitly before fclose() drops the
+                // stream. The @-suppressor handles the unusual case
+                // of an already-closed stream (the emitter threw
+                // before we got here).
+                @fwrite($stream, "0\r\n\r\n");
+            }
             fflush($stream);
             fclose($stream);
         }

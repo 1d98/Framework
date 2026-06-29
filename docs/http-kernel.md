@@ -200,7 +200,7 @@ Outer → inner. Why this order: **Compression** outer so 500s still get gzipped
 | `MultipartBodyParser` | parses `multipart/form-data` + writes uploads to a tmp dir | `$tmpDir`, `$maxBodyBytes` |
 | `RateLimitMiddleware` | per-key token bucket | `$capacity`, `$refillPerSecond`, `?Clock`, `?Closure` key extractor |
 | `SecurityHeadersMiddleware` | CSP + HSTS + clickjacking/MIME guards | `$headers`, `$hstsMaxAge`, `$csp`, `$trustedProxies` |
-| `CsrfMiddleware` | signed-cookie double-submit CSRF | `$jar`, `$exemptPrefixes`, `$exemptPaths`, `$logger`, `$trustedProxies` |
+| `CsrfMiddleware` | signed-cookie double-submit CSRF | `$jar`, `$exemptPrefixes`, `$exemptPaths`, `$logger`, `$trustedProxies`, `$ttl` (default 3600 s, 0.7.2+), `$graceTtl` (default 604800 s, 0.7.2+) |
 
 ## Custom middleware
 
